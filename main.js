@@ -1,5 +1,7 @@
-// 🧹 Fix for ENOSPC / temp overflow in hosted panels
-require('dotenv').config();
+// 🧹 Safe dotenv initialization
+try {
+    require('dotenv').config();
+} catch (_) {}
 
 // Record bot process boot timestamp and sync real server time offset
 global.botStartTime = Math.floor(Date.now() / 1000);
@@ -206,7 +208,6 @@ const weatherCommand = require('./commands/weather');
 const newsCommand = require('./commands/news');
 const kickCommand = require('./commands/kick');
 const simageCommand = require('./commands/simage');
-const attpCommand = require('./commands/attp');
 const { startHangman, guessLetter } = require('./commands/hangman');
 const { startTrivia, answerTrivia } = require('./commands/trivia');
 const { complimentCommand } = require('./commands/compliment');
@@ -237,7 +238,6 @@ const staffCommand = require('./commands/staff');
 const { adminlockCommand, handleAdminlockPromotion } = require('./commands/adminlock');
 const addCommand = require('./commands/add');
 const unbanCommand = require('./commands/unban');
-const emojimixCommand = require('./commands/emojimix');
 const { handlePromotionEvent } = require('./commands/promote');
 const { handleDemotionEvent } = require('./commands/demote');
 const viewOnceCommand = require('./commands/viewonce');
@@ -246,7 +246,6 @@ const clearSessionCommand = require('./commands/clearsession');
 const { autoStatusCommand, handleStatusUpdate } = require('./commands/autostatus');
 const { simpCommand } = require('./commands/simp');
 const { stupidCommand } = require('./commands/stupid');
-const stickerTelegramCommand = require('./commands/stickertelegram');
 const textmakerCommand = require('./commands/textmaker');
 const { handleAntideleteCommand, handleMessageRevocation, storeMessage } = require('./commands/antidelete');
 const clearTmpCommand = require('./commands/cleartmp');
@@ -254,10 +253,7 @@ const setProfilePicture = require('./commands/setpp');
 const { setGroupDescription, setGroupName, setGroupPhoto } = require('./commands/groupmanage');
 const instagramCommand = require('./commands/instagram');
 const facebookCommand = require('./commands/facebook');
-const spotifyCommand = require('./commands/spotify');
-const playCommand = require('./commands/play');
 const tiktokCommand = require('./commands/tiktok');
-const songCommand = require('./commands/song');
 const aiCommand = require('./commands/ai');
 const urlCommand = require('./commands/url');
 const qcCommand = require('./commands/qc');
@@ -271,7 +267,6 @@ const { goodnightCommand } = require('./commands/goodnight');
 const { shayariCommand } = require('./commands/shayari');
 const { rosedayCommand } = require('./commands/roseday');
 const imagineCommand = require('./commands/imagine');
-const videoCommand = require('./commands/video');
 const sudoCommand = require('./commands/sudo');
 const { miscCommand, handleHeart } = require('./commands/misc');
 const { animeCommand } = require('./commands/anime');
@@ -958,9 +953,6 @@ async function handleMessages(sock, messageUpdate, printLog) {
             case userMessage.startsWith('.delete') || userMessage.startsWith('.del'):
                 await deleteCommand(sock, chatId, message, senderId);
                 break;
-            case userMessage.startsWith('.attp'):
-                await attpCommand(sock, chatId, message);
-                break;
 
             case userMessage === '.settings':
                 await settingsCommand(sock, chatId, message);
@@ -1429,12 +1421,6 @@ async function handleMessages(sock, messageUpdate, printLog) {
             case userMessage.startsWith('.tourl') || userMessage.startsWith('.url'):
                 await urlCommand(sock, chatId, message);
                 break;
-            case userMessage.startsWith('.emojimix') || userMessage.startsWith('.emix'):
-                await emojimixCommand(sock, chatId, message);
-                break;
-            case userMessage.startsWith('.tg') || userMessage.startsWith('.stickertelegram') || userMessage.startsWith('.tgsticker') || userMessage.startsWith('.telesticker'):
-                await stickerTelegramCommand(sock, chatId, message);
-                break;
 
             case userMessage.startsWith('.vv'):
                 await viewOnceCommand(sock, chatId, message);
@@ -1540,18 +1526,6 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 break;
             case userMessage.startsWith('.fb') || userMessage.startsWith('.facebook'):
                 await facebookCommand(sock, chatId, message);
-                break;
-            case userMessage.startsWith('.music'):
-                await playCommand(sock, chatId, message);
-                break;
-            case userMessage.startsWith('.spotify'):
-                await spotifyCommand(sock, chatId, message);
-                break;
-            case userMessage.startsWith('.play') || userMessage.startsWith('.mp3') || userMessage.startsWith('.ytmp3') || userMessage.startsWith('.song'):
-                await songCommand(sock, chatId, message);
-                break;
-            case userMessage.startsWith('.video') || userMessage.startsWith('.ytmp4'):
-                await videoCommand(sock, chatId, message);
                 break;
             case userMessage.startsWith('.tiktok') || userMessage.startsWith('.tt'):
                 await tiktokCommand(sock, chatId, message);
