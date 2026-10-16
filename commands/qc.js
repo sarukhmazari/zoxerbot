@@ -1,33 +1,39 @@
 const axios = require('axios');
-const fs = require('fs');
 const path = require('path');
-const { exec } = require('child_process');
 const crypto = require('crypto');
+const { Jimp, loadFont, measureTextHeight } = require('jimp');
 const webp = require('node-webpmux');
-const sharp = require('sharp');
 const settings = require('../settings');
 
-const colors = [
-    '#0df5c4', // Cyan
-    '#f5d50d', // Yellow
-    '#f50db5', // Pink
-    '#0d9bf5', // Blue
-    '#f57c0d', // Orange
-    '#1df50d', // Green
-    '#ab47bc', // Purple
-    '#2e7d32', // Dark Green
-    '#c2185b', // Deep Pink
-    '#e65100'  // Dark Orange
-];
+// Helper to create EXIF metadata buffer for WhatsApp stickers
+function createExif(packname, author) {
+    const json = {
+        'sticker-pack-id': crypto.randomBytes(32).toString('hex'),
+        'sticker-pack-name': packname || settings.packname || 'ZOXER BOT',
+        'sticker-pack-publisher': author || settings.author || 'ZOXER TEAM',
+        'emojis': ['🤖']
+    };
+    const exifAttr = Buffer.from([0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x41, 0x57, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16, 0x00, 0x00, 0x00]);
+    const jsonBuffer = Buffer.from(JSON.stringify(json), 'utf8');
+    const exif = Buffer.concat([exifAttr, jsonBuffer]);
+    exif.writeUIntLE(jsonBuffer.length, 14, 4);
+    return exif;
+}
 
-function getSenderColor(jid) {
-    let hash = 0;
-    const cleanJid = jid || 'user';
-    for (let i = 0; i < cleanJid.length; i++) {
-        hash = cleanJid.charCodeAt(i) + ((hash << 5) - hash);
+let cachedFontText = null;
+let cachedFontName = null;
+
+async function getFonts() {
+    if (!cachedFontText) {
+        try {
+            const fontPath = path.join(__dirname, '../node_modules/@jimp/plugin-print/fonts/open-sans/open-sans-16-white/open-sans-16-white.fnt');
+            cachedFontText = await loadFont(fontPath);
+            cachedFontName = cachedFontText;
+        } catch (e) {
+            console.error('Failed to load bitmap fonts for QC:', e.message);
+        }
     }
-    const index = Math.abs(hash) % colors.length;
-    return colors[index];
+    return { fontText: cachedFontText, fontName: cachedFontName };
 }
 
 async function qcCommand(sock, chatId, text, message) {
@@ -37,10 +43,10 @@ async function qcCommand(sock, chatId, text, message) {
 
     // If it's a reply, use the replied message text instead of args
     if (quotedMsg) {
-        textToQuote = quotedMsg.conversation || 
-                      quotedMsg.extendedTextMessage?.text || 
-                      quotedMsg.imageMessage?.caption || 
-                      quotedMsg.videoMessage?.caption || '';
+        textToQuote = quotedMsg.conversation ||
+            quotedMsg.extendedTextMessage?.text ||
+            quotedMsg.imageMessage?.caption ||
+            quotedMsg.videoMessage?.caption || '';
     }
 
     if (!textToQuote) {
@@ -48,146 +54,96 @@ async function qcCommand(sock, chatId, text, message) {
         return;
     }
 
-    // React to let the user know we are working on it
+    // React to let user know we are working on it
     try {
         await sock.sendMessage(chatId, { react: { text: '🔄', key: message.key } });
-    } catch (e) {}
+    } catch (e) { }
 
     const senderJid = quotedInfo?.participant || quotedInfo?.sender || message.key.participant || message.key.remoteJid;
     let senderName = message.pushName || 'User';
     if (quotedInfo && quotedInfo.participant) {
         senderName = quotedInfo.participant.split('@')[0];
     }
-    
-    // Clean name for display
     if (senderName.includes('@')) {
         senderName = senderName.split('@')[0];
     }
 
-    let profilePicUrl = '';
+    // Fetch profile picture if available
+    let avatarImg = null;
     try {
-        profilePicUrl = await sock.profilePictureUrl(senderJid, 'image');
-    } catch (e) {}
-
-    // Fetch profile picture as Base64 Data URI
-    let avatarBase64 = '';
-    if (profilePicUrl) {
-        try {
+        const profilePicUrl = await sock.profilePictureUrl(senderJid, 'image');
+        if (profilePicUrl) {
             const avatarRes = await axios.get(profilePicUrl, { responseType: 'arraybuffer', timeout: 5000 });
-            const mime = avatarRes.headers['content-type'] || 'image/jpeg';
-            avatarBase64 = `data:${mime};base64,${Buffer.from(avatarRes.data).toString('base64')}`;
-        } catch (e) {
-            console.error('QC: Failed to fetch profile picture:', e.message);
+            avatarImg = await Jimp.read(avatarRes.data);
+            avatarImg.resize({ w: 56, h: 56 });
+            avatarImg.circle();
         }
+    } catch (e) {
+        // Fallback to default avatar
     }
 
-    // Calculate height dynamically
-    const lines = textToQuote.split('\n');
-    let linesCount = 0;
-    for (const line of lines) {
-        linesCount += Math.max(1, Math.ceil(line.length / 28));
+    if (!avatarImg) {
+        avatarImg = new Jimp({ width: 56, height: 56, color: 0x3b82f6ff });
+        avatarImg.circle();
     }
-    const nameColor = getSenderColor(senderJid);
-    const estimatedHeight = Math.max(120, 80 + linesCount * 22 + (senderName ? 22 : 0));
-
-    // Escape HTML special characters
-    const formattedText = textToQuote
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/\n/g, '<br/>');
-
-    // Build SVG
-    let avatarHtml = `<image x="15" y="15" width="60" height="60" href="${avatarBase64}" clip-path="url(#circleView)" />`;
-    if (!avatarBase64) {
-        // High quality fallback vector avatar
-        avatarHtml = `
-          <g clip-path="url(#circleView)">
-            <circle cx="45" cy="45" r="30" fill="#374151" />
-            <circle cx="45" cy="35" r="11" fill="#9ca3af" />
-            <path d="M 23 58 C 23 46, 67 46, 67 58 Z" fill="#9ca3af" />
-          </g>
-        `;
-    }
-
-    const svg = `
-    <svg width="512" height="${estimatedHeight}" viewBox="0 0 512 ${estimatedHeight}" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <clipPath id="circleView">
-          <circle cx="45" cy="45" r="30" />
-        </clipPath>
-      </defs>
-      
-      <!-- Avatar -->
-      ${avatarHtml}
-      
-      <!-- Chat Bubble Content via foreignObject -->
-      <foreignObject x="90" y="15" width="400" height="${estimatedHeight - 30}">
-        <div xmlns="http://www.w3.org/1999/xhtml" style="
-          background-color: #202c33;
-          color: #e9edef;
-          border-radius: 0px 16px 16px 16px;
-          padding: 12px 16px;
-          font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          box-shadow: 0 1px 0.5px rgba(11,20,26,.13);
-          display: inline-block;
-          max-width: 360px;
-        ">
-          ${senderName ? `<div style="color: ${nameColor}; font-weight: bold; font-size: 15px; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px;">${senderName}</div>` : ''}
-          <div style="font-size: 15px; line-height: 1.4; word-wrap: break-word; white-space: pre-wrap;">${formattedText}</div>
-        </div>
-      </foreignObject>
-    </svg>
-    `;
 
     try {
-        const tmpDir = path.join(process.cwd(), 'tmp');
-        if (!fs.existsSync(tmpDir)) {
-            fs.mkdirSync(tmpDir, { recursive: true });
+        await webp.Image.initLib();
+        const { fontText, fontName } = await getFonts();
+
+        if (!fontText) {
+            throw new Error('Font not available');
         }
 
-        const tempOutput = path.join(tmpDir, `qc_${Date.now()}.webp`);
+        const maxTextWidth = 320;
+        const padding = 16;
+        const textHeight = measureTextHeight(fontText, textToQuote, maxTextWidth);
+        const nameHeight = senderName ? 24 : 0;
+        const bubbleHeight = Math.max(70, padding + nameHeight + textHeight + padding);
+        const bubbleWidth = Math.min(380, maxTextWidth + (padding * 2));
 
-        // Render SVG directly to WebP sticker size using sharp
-        await sharp(Buffer.from(svg))
-            .resize(512, 512, {
-                fit: 'contain',
-                background: { r: 0, g: 0, b: 0, alpha: 0 }
-            })
-            .webp({ quality: 80 })
-            .toFile(tempOutput);
+        // Create dark WhatsApp chat bubble
+        const bubble = new Jimp({ width: bubbleWidth, height: bubbleHeight, color: 0x202c33ff });
 
-        const webpBuffer = fs.readFileSync(tempOutput);
+        // Print sender name & text
+        let curY = padding - 4;
+        if (senderName) {
+            bubble.print({ font: fontName, x: padding, y: curY, text: senderName });
+            curY += 22;
+        }
+        bubble.print({ font: fontText, x: padding, y: curY, text: textToQuote, maxWidth: maxTextWidth });
 
-        // Add sticker metadata
-        const img = new webp.Image();
-        await img.load(webpBuffer);
+        // Composite onto 512x512 transparent canvas
+        const canvas = new Jimp({ width: 512, height: 512, color: 0x00000000 });
+        const startY = Math.max(10, Math.round((512 - bubbleHeight) / 2));
+        const avatarX = 20;
+        const bubbleX = 86;
 
-        const json = {
-            'sticker-pack-id': crypto.randomBytes(32).toString('hex'),
-            'sticker-pack-name': settings.packname || 'zoxerbot',
-            'sticker-pack-publisher': settings.author || 'Sarukh Zoxer',
-            'emojis': ['🤖']
-        };
+        canvas.composite(avatarImg, avatarX, startY);
+        canvas.composite(bubble, bubbleX, startY);
 
-        const exifAttr = Buffer.from([0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x41, 0x57, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16, 0x00, 0x00, 0x00]);
-        const jsonBuffer = Buffer.from(JSON.stringify(json), 'utf8');
-        const exif = Buffer.concat([exifAttr, jsonBuffer]);
-        exif.writeUIntLE(jsonBuffer.length, 14, 4);
-        img.exif = exif;
+        // Convert to WebP sticker with EXIF
+        const emptyBuf = Buffer.from([
+            0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00,
+            0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38, 0x20,
+            0x18, 0x00, 0x00, 0x00, 0x30, 0x01, 0x00, 0x9d,
+            0x01, 0x2a, 0x01, 0x00, 0x01, 0x00, 0x02, 0x00,
+            0x34, 0x25, 0xa4, 0x00, 0x03, 0x70, 0x00, 0xfe,
+            0xfb, 0xfd, 0x50, 0x00
+        ]);
 
-        const finalBuffer = await img.save(null);
+        const webpImg = new webp.Image();
+        await webpImg.load(emptyBuf);
+        await webpImg.setImageData(canvas.bitmap.data, { width: 512, height: 512, quality: 85 });
+        webpImg.exif = createExif(settings.packname, settings.author);
+
+        const finalBuffer = await webpImg.save(null);
 
         // Send Sticker
         await sock.sendMessage(chatId, { sticker: finalBuffer }, { quoted: message });
 
-        // Clean up
-        try {
-            fs.unlinkSync(tempOutput);
-        } catch (e) {}
-
     } catch (error) {
-        console.error('Error generating local webp sticker for QC:', error);
+        console.error('Error generating QC sticker:', error);
         await sock.sendMessage(chatId, { text: '❌ Failed to process sticker image.' });
     }
 }
