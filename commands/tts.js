@@ -4,27 +4,32 @@ const path = require('path');
 
 async function ttsCommand(sock, chatId, text, message, language = 'en') {
     if (!text) {
-        await sock.sendMessage(chatId, { text: 'Please provide the text for TTS conversion.' });
+        await sock.sendMessage(chatId, { text: 'Please provide the text for TTS conversion.' }, { quoted: message });
         return;
     }
 
     const fileName = `tts-${Date.now()}.mp3`;
     const filePath = path.join(__dirname, '..', 'assets', fileName);
 
-    const gtts = new gTTS(text, language);
-    gtts.save(filePath, async function (err) {
-        if (err) {
-            await sock.sendMessage(chatId, { text: 'Error generating TTS audio.' });
-            return;
-        }
+    try {
+        await new Promise((resolve, reject) => {
+            const gtts = new gTTS(text, language);
+            gtts.save(filePath, (err) => err ? reject(err) : resolve());
+        });
 
+        const audioBuffer = fs.readFileSync(filePath);
         await sock.sendMessage(chatId, {
-            audio: { url: filePath },
+            audio: audioBuffer,
             mimetype: 'audio/mpeg'
         }, { quoted: message });
-
-        fs.unlinkSync(filePath);
-    });
+    } catch (error) {
+        console.error('TTS error:', error);
+        await sock.sendMessage(chatId, { text: 'Error generating TTS audio.' }, { quoted: message });
+    } finally {
+        try {
+            if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        } catch (e) {}
+    }
 }
 
 module.exports = ttsCommand;

@@ -24,7 +24,11 @@ async function settingsCommand(sock, chatId, message) {
         const isGroup = chatId.endsWith('@g.us');
         const dataDir = './data';
 
-        const mode = readJsonSafe(`${dataDir}/messageCount.json`, { isPublic: true });
+        let mode = readJsonSafe(`${dataDir}/bot-settings.json`, { isPublic: true });
+        if (typeof mode.isPublic !== 'boolean') {
+            const legacyMode = readJsonSafe(`${dataDir}/messageCount.json`, { isPublic: true });
+            mode = { isPublic: typeof legacyMode.isPublic === 'boolean' ? legacyMode.isPublic : true };
+        }
         const autoStatus = readJsonSafe(`${dataDir}/autoStatus.json`, { enabled: false });
         const autoread = readJsonSafe(`${dataDir}/autoread.json`, { enabled: false });
         const autotyping = readJsonSafe(`${dataDir}/autotyping.json`, { enabled: false });

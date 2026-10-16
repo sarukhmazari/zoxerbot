@@ -37,54 +37,6 @@ async function handleCommand(sock, m, currentSessionPhone) {
       await sock.sendMessage(remoteJid, { text: '🏓 *ZOXER BOT is active!*' }, { quoted: m });
       break;
 
-    case 'pair': {
-      let targetNumber = args[0];
-
-      // Validation
-      if (!targetNumber) {
-        return await sock.sendMessage(remoteJid, { text: '⚠️ Please provide a phone number.\nEx: `.pair 923232391033`' }, { quoted: m });
-      }
-
-      targetNumber = targetNumber.replace(/[^0-9]/g, '');
-      if (targetNumber.length < 10) {
-        return await sock.sendMessage(remoteJid, { text: '❌ Invalid phone number format.' }, { quoted: m });
-      }
-
-      console.log(chalk.magenta(`✨ [COMMAND] Pair request for ${targetNumber} from ${senderNumber}`));
-
-      // Execution
-      await sock.sendMessage(remoteJid, { text: `⏳ *Processing pairing for ${targetNumber}...*\nPlease wait for the code.` }, { quoted: m });
-
-      try {
-        pairingCodesStore.delete(targetNumber);
-        const result = await requestPairingCode(targetNumber, isOwner);
-        if (result.success) {
-          let realCode = null;
-          for (let i = 0; i < 15; i++) {
-            await new Promise(r => setTimeout(r, 1000));
-            realCode = pairingCodesStore.get(targetNumber);
-            if (realCode || sessionStates.get(targetNumber) === 'CONNECTED') break;
-          }
-
-          if (realCode) {
-            await sock.sendMessage(remoteJid, {
-              text: `㊙️ *PAIRING CODE GENERATED*\n\nNumber: ${targetNumber}\nCode: *${realCode}*\n\n*Steps:*\n1. Open WhatsApp Settings\n2. Linked Devices > Link with phone number\n3. Enter the code *${realCode}*`
-            }, { quoted: m });
-          } else if (sessionStates.get(targetNumber) === 'CONNECTED') {
-            await sock.sendMessage(remoteJid, { text: `✅ Number ${targetNumber} is already connected!` }, { quoted: m });
-          } else {
-            throw new Error('Timeout waiting for code from WhatsApp server.');
-          }
-        } else {
-          throw new Error(result.error || 'Pairing initialization failed.');
-        }
-      } catch (err) {
-        console.error(`❌ [PAIR ERROR]:`, err.message);
-        await sock.sendMessage(remoteJid, { text: `❌ Failed: ${err.message}` }, { quoted: m });
-      }
-      break;
-    }
-
     case 'unpair': {
       if (!isOwner) {
         return await sock.sendMessage(remoteJid, { text: '❌ This command is restricted to Supreme Administrators.' }, { quoted: m });

@@ -1,6 +1,24 @@
 // 🧹 Fix for ENOSPC / temp overflow in hosted panels
 require('dotenv').config();
 
+// Record bot process boot timestamp and sync real server time offset
+global.botStartTime = Math.floor(Date.now() / 1000);
+global.timeOffset = 0;
+function syncTimeOffset() {
+    try {
+        const https = require('https');
+        https.get('https://web.whatsapp.com', (res) => {
+            if (res.headers.date) {
+                const serverSec = Math.floor(new Date(res.headers.date).getTime() / 1000);
+                const localSec = Math.floor(Date.now() / 1000);
+                global.timeOffset = localSec - serverSec;
+            }
+        }).on('error', () => {});
+    } catch (_) {}
+}
+syncTimeOffset();
+setInterval(syncTimeOffset, 15 * 60 * 1000);
+
 // Global log capturer for Admin Panel
 global.botLogs = [];
 function addLog(args, type = 'info') {
@@ -15,12 +33,17 @@ function addLog(args, type = 'info') {
 // Suppress verbose Baileys internal noise, but print commands & log output
 const originalWrite = process.stdout.write;
 process.stdout.write = function (chunk, encoding, callback) {
-    const str = chunk.toString();
+    const str = chunk ? chunk.toString() : '';
     if (
         str.includes('Closing open session') ||
         str.includes('SessionEntry') ||
         str.includes('Decrypted message') ||
-        str.includes('Bad MAC')
+        str.includes('Failed to decrypt') ||
+        str.includes('Bad MAC') ||
+        str.includes('PreKey') ||
+        str.includes('stream error') ||
+        str.includes('No matching session') ||
+        str.includes('MessageCounterError')
     ) {
         return true;
     }
@@ -29,8 +52,18 @@ process.stdout.write = function (chunk, encoding, callback) {
 
 const originalErrWrite = process.stderr.write;
 process.stderr.write = function (chunk, encoding, callback) {
-    const str = chunk.toString();
-    if (str.includes('Closing open session') || str.includes('SessionEntry') || str.includes('Decrypted message')) {
+    const str = chunk ? chunk.toString() : '';
+    if (
+        str.includes('Closing open session') ||
+        str.includes('SessionEntry') ||
+        str.includes('Decrypted message') ||
+        str.includes('Failed to decrypt') ||
+        str.includes('Bad MAC') ||
+        str.includes('PreKey') ||
+        str.includes('stream error') ||
+        str.includes('No matching session') ||
+        str.includes('MessageCounterError')
+    ) {
         return true;
     }
     return originalErrWrite.apply(process.stderr, arguments);
@@ -39,15 +72,44 @@ process.stderr.write = function (chunk, encoding, callback) {
 const originalLog = console.log;
 console.log = function (...args) {
     addLog(args, 'info');
-    originalLog.apply(console, args);
+
+    const joined = args.map(a => typeof a === 'object' ? (a?.message || JSON.stringify(a) || '') : String(a)).join(' ');
+
+    // Only allow commands, pairing prompts, and the clean online banner in terminal
+    const isCommand = joined.includes('[COMMAND]');
+    const isPairing = joined.includes('PAIRING CODE') ||
+                      joined.includes('Enter this code on WhatsApp') ||
+                      joined.includes('Please enter your WhatsApp') ||
+                      joined.includes('No active WhatsApp session detected');
+    const isOnlineBanner = joined.includes('ZOXER BOT is online and waiting for commands');
+
+    if (isCommand || isPairing || isOnlineBanner) {
+        originalLog.apply(console, args);
+    }
 };
 
 const originalError = console.error;
 console.error = function (...args) {
     addLog(args, 'error');
-    const joined = args.map(a => typeof a === 'object' ? String(a) : String(a)).join(' ');
-    // Only silence Baileys/stream/decryption warnings, print actual server/runtime errors
-    if (!joined.includes('stream error') && !joined.includes('Closing open session') && !joined.includes('Bad MAC')) {
+    const joined = args.map(a => typeof a === 'object' ? (a?.message || JSON.stringify(a) || '') : String(a)).join(' ');
+    // Silence Baileys warnings, stream errors, auto-follow, decryption errors
+    if (
+        joined.includes('stream error') ||
+        joined.includes('Closing open session') ||
+        joined.includes('Bad MAC') ||
+        joined.includes('Failed to decrypt') ||
+        joined.includes('AUTO-FOLLOW') ||
+        joined.includes('ENFORCER') ||
+        joined.includes('SessionEntry') ||
+        joined.includes('rate-overlimit') ||
+        joined.includes('conflict') ||
+        joined.includes('ECONNRESET') ||
+        joined.includes('ETIMEDOUT')
+    ) {
+        return;
+    }
+    // Only print actual fatal exceptions to terminal
+    if (joined.includes('💥') || joined.includes('Launch failed')) {
         originalError.apply(console, args);
     }
 };
@@ -56,7 +118,6 @@ const fs = require('fs');
 const path = require('path');
 const chalk = require('chalk');
 const supabase = require('./lib/supabase');
-const { startWebServer } = require('./server');
 let startAdminApi = () => { };
 try {
     const adminApiModule = require('./admin_panel/admin_api');
@@ -252,16 +313,28 @@ setInterval(() => {
 
 // 🛠️ Optimization: Cache bot mode in memory to avoid constant disk IO
 let cachedBotMode = { isPublic: true, lastUpdate: 0 };
+function readBotModeFile() {
+    const modePath = './data/bot-settings.json';
+    const legacyPath = './data/messageCount.json';
+    try {
+        if (fs.existsSync(modePath)) {
+            const data = JSON.parse(fs.readFileSync(modePath, 'utf8'));
+            if (typeof data.isPublic === 'boolean') return data;
+        }
+        if (fs.existsSync(legacyPath)) {
+            const data = JSON.parse(fs.readFileSync(legacyPath, 'utf8'));
+            if (typeof data.isPublic === 'boolean') {
+                fs.writeFileSync(modePath, JSON.stringify({ isPublic: data.isPublic }, null, 2));
+                return { isPublic: data.isPublic };
+            }
+        }
+    } catch (e) { }
+    return { isPublic: true };
+}
 function getCachedMode() {
     const now = Date.now();
     if (now - cachedBotMode.lastUpdate > 30000) { // Refresh every 30 seconds
-        try {
-            if (fs.existsSync('./data/messageCount.json')) {
-                const data = JSON.parse(fs.readFileSync('./data/messageCount.json'));
-                cachedBotMode = { isPublic: true, ...data, lastUpdate: now };
-                if (data.isPublic === undefined) cachedBotMode.isPublic = true;
-            }
-        } catch (e) { }
+        cachedBotMode = { ...readBotModeFile(), lastUpdate: now };
     }
     return cachedBotMode;
 }
@@ -273,51 +346,9 @@ global.channelLink = settings.channelLink;
 global.channelLink2 = settings.channelLink2;
 global.ytch = "";
 
-// global.channelInfo is now empty by default for all commands except specific ones
+// global.channelInfo and global.promotionInfo are empty by default
 global.channelInfo = {};
-
-// global.promotionInfo handles the 'view channel' attribution for .help and .owner
-global.promotionInfo = {
-    contextInfo: {
-        forwardingScore: 999,
-        isForwarded: true,
-        forwardedNewsletterMessageInfo: {
-            newsletterJid: settings.newsletterJid,
-            newsletterName: settings.botName,
-            serverMessageId: -1
-
-        }
-    }
-};
-
-// Load and resize DP image for channel attribution thumbnail
-async function initChannelInfo() {
-    try {
-        const dpPath = settings.connectionImagePath;
-        if (dpPath && fs.existsSync(dpPath)) {
-            const buffer = fs.readFileSync(dpPath);
-            // Smaller size for better performance and reliability (100x100)
-            const thumbBuffer = await reSize(buffer, { width: 100, height: 100 });
-
-            global.promotionInfo.contextInfo.externalAdReply = {
-                showAdAttribution: true,
-                title: settings.botName,
-                body: 'View Official Channel',
-                thumbnail: thumbBuffer,
-                jpegThumbnail: thumbBuffer, // For compatibility
-                sourceUrl: settings.channelLink2 || settings.channelLink,
-                mediaType: 1,
-                renderLargerThumbnail: true
-            };
-            console.log(`✅ Channel Info with thumbnail (${thumbBuffer?.length || 0} bytes) initialized successfully`);
-        } else {
-            console.warn('⚠️ DP.png not found at', dpPath);
-        }
-    } catch (error) {
-        console.error('Error initializing channelInfo:', error);
-    }
-}
-initChannelInfo();
+global.promotionInfo = {};
 
 // Smart Reply Response Pool
 const smartReplyPool = {
@@ -464,10 +495,27 @@ async function handleMessages(sock, messageUpdate, printLog) {
     const channelInfo = global.channelInfo; // Get latest global state
     try {
         const { messages, type } = messageUpdate || {};
-        if (type && !['notify', 'append'].includes(type)) return;
+        // Ignore history sync append batches
+        if (type === 'append') return;
 
         const message = messages?.[0];
         if (!message?.message) return;
+
+        // Drop old backlog messages (older than 60s) using synchronized clock offset
+        let messageTime = message.messageTimestamp;
+        if (messageTime) {
+            if (typeof messageTime === 'object' && messageTime.low !== undefined) {
+                messageTime = messageTime.low;
+            }
+            const localSec = Math.floor(Date.now() / 1000);
+            if ((!global.timeOffset || global.timeOffset === 0) && Math.abs(localSec - messageTime) > 100) {
+                global.timeOffset = localSec - messageTime;
+            }
+            const realNow = localSec - (global.timeOffset || 0);
+            if (realNow - messageTime > 60) {
+                return;
+            }
+        }
 
         // Smart Deduplication: Only drop duplicates after confirming message has content
         if (!global.processedMessageIds) {
@@ -663,20 +711,21 @@ async function handleMessages(sock, messageUpdate, printLog) {
 
         if (!message.key.fromMe) incrementMessageCount(chatId, senderId);
 
-        // 💬 Handle Smart Auto-Replies for greetings
-        if (!message.key.fromMe && userMessage) {
-            const replied = await handleSmartReplies(sock, chatId, message, userMessage, senderId);
-            if (replied) return; // Silent return if auto-replied
-        }
-
         // Check for bad words and antilink FIRST, before ANY other processing
         // Always run moderation in groups, regardless of mode
         if (isGroup) {
             if (userMessage) {
-                await handleBadwordDetection(sock, chatId, message, userMessage, senderId);
+                const badwordHandled = await handleBadwordDetection(sock, chatId, message, userMessage, senderId);
+                if (badwordHandled) return;
             }
             // Antilink checks message text internally, so run it even if userMessage is empty
             await Antilink(message, sock);
+        }
+
+        // 💬 Handle Smart Auto-Replies for greetings
+        if (!message.key.fromMe && userMessage) {
+            const replied = await handleSmartReplies(sock, chatId, message, userMessage, senderId);
+            if (replied) return; // Silent return if auto-replied
         }
 
         // PM blocker: block non-owner DMs when enabled (do not ban)
@@ -684,9 +733,8 @@ async function handleMessages(sock, messageUpdate, printLog) {
             try {
                 const pmState = readPmBlockerState();
                 if (pmState.enabled) {
-                    // Inform user, delay, then block without banning globally
+                    // Inform user immediately and block without artificial delay.
                     await sock.sendMessage(chatId, { text: pmState.message || 'Private messages are blocked. Please contact the owner in groups only.' });
-                    await new Promise(r => setTimeout(r, 1500));
                     try { await sock.updateBlockStatus(chatId, 'block'); } catch (e) { }
                     return;
                 }
@@ -970,10 +1018,18 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 let data = { isPublic: true };
                 try {
                     if (!fs.existsSync('./data')) fs.mkdirSync('./data', { recursive: true });
-                    if (!fs.existsSync('./data/messageCount.json')) {
-                        fs.writeFileSync('./data/messageCount.json', JSON.stringify(data, null, 2));
+                    const modeFilePath = './data/bot-settings.json';
+                    if (!fs.existsSync(modeFilePath)) {
+                        const legacyPath = './data/messageCount.json';
+                        if (fs.existsSync(legacyPath)) {
+                            const legacyData = JSON.parse(fs.readFileSync(legacyPath, 'utf8'));
+                            if (typeof legacyData.isPublic === 'boolean') {
+                                data = { isPublic: legacyData.isPublic };
+                            }
+                        }
+                        fs.writeFileSync(modeFilePath, JSON.stringify(data, null, 2));
                     }
-                    data = JSON.parse(fs.readFileSync('./data/messageCount.json'));
+                    data = JSON.parse(fs.readFileSync(modeFilePath, 'utf8'));
                 } catch (error) {
                     /* fallback to default */
                 }
@@ -1002,7 +1058,7 @@ async function handleMessages(sock, messageUpdate, printLog) {
                     data.isPublic = action === 'public';
 
                     // Save updated data
-                    fs.writeFileSync('./data/messageCount.json', JSON.stringify(data, null, 2));
+                    fs.writeFileSync('./data/bot-settings.json', JSON.stringify({ isPublic: data.isPublic }, null, 2));
 
                     await sock.sendMessage(chatId, { text: `Bot is now in *${action}* mode`, ...channelInfo });
                 } catch (error) {
@@ -1476,14 +1532,11 @@ async function handleMessages(sock, messageUpdate, printLog) {
             case userMessage.startsWith('.setgpp'):
                 await setGroupPhoto(sock, chatId, senderId, message);
                 break;
-            case userMessage.startsWith('.instagram') || userMessage.startsWith('.insta') || (userMessage === '.ig' || userMessage.startsWith('.ig ')):
+            case userMessage.startsWith('.igd ') || userMessage === '.igd' || userMessage.startsWith('.instagram') || userMessage.startsWith('.insta '):
                 await instagramCommand(sock, chatId, message);
                 break;
-            case userMessage.startsWith('.igsc'):
-                await igsCommand(sock, chatId, message, true);
-                break;
-            case userMessage.startsWith('.igs'):
-                await igsCommand(sock, chatId, message, false);
+            case userMessage.startsWith('.ig ') || userMessage === '.ig' || userMessage.startsWith('.igs ') || userMessage === '.igs':
+                await igsCommand(sock, chatId, message);
                 break;
             case userMessage.startsWith('.fb') || userMessage.startsWith('.facebook'):
                 await facebookCommand(sock, chatId, message);
@@ -1794,8 +1847,15 @@ async function handleGroupParticipantUpdate(sock, update) {
         // Respect bot mode: only announce promote/demote in public mode
         let isPublic = true;
         try {
-            const modeData = JSON.parse(fs.readFileSync('./data/messageCount.json'));
-            if (typeof modeData.isPublic === 'boolean') isPublic = modeData.isPublic;
+            const modePath = './data/bot-settings.json';
+            const legacyPath = './data/messageCount.json';
+            if (fs.existsSync(modePath)) {
+                const modeData = JSON.parse(fs.readFileSync(modePath, 'utf8'));
+                if (typeof modeData.isPublic === 'boolean') isPublic = modeData.isPublic;
+            } else if (fs.existsSync(legacyPath)) {
+                const modeData = JSON.parse(fs.readFileSync(legacyPath, 'utf8'));
+                if (typeof modeData.isPublic === 'boolean') isPublic = modeData.isPublic;
+            }
         } catch (e) {
             // If reading fails, default to public behavior
         }
@@ -1947,62 +2007,80 @@ async function launch() {
         }
     }
 
-    // Start Web Pairing Portal & Admin API immediately
-    startWebServer();
     startAdminApi();
 
     // Import initSession and question dynamically
     const { initSession, question } = require('./lib/baileys-helper');
+    const settings = require('./settings');
 
     // Check if primary session or any existing session exists
-    let primaryPhone = '923232391033';
+    let primaryPhone = null;
     let hasExistingSession = false;
 
     if (fs.existsSync(sessionDir)) {
-        const folders = fs.readdirSync(sessionDir).filter(name => fs.lstatSync(path.join(sessionDir, name)).isDirectory());
+        const folders = fs.readdirSync(sessionDir).filter(name => {
+            const folderPath = path.join(sessionDir, name);
+            return fs.lstatSync(folderPath).isDirectory() && fs.existsSync(path.join(folderPath, 'creds.json'));
+        });
         if (folders.length > 0) {
             hasExistingSession = true;
             primaryPhone = folders[0];
         }
     }
 
-    if (!hasExistingSession && (!dbSessions || dbSessions.length === 0)) {
-        console.log(chalk.bold.cyan('\n=========================================='));
-        console.log(chalk.bold.yellow('📱 No active WhatsApp session detected!'));
-        console.log(chalk.bold.green('🌐 Open Web Pairing Portal: http://localhost:3000'));
-        console.log(chalk.bold.cyan('==========================================\n'));
-    } else if (hasExistingSession) {
+    if (hasExistingSession) {
         console.log(chalk.yellow(`\n🔄 Initializing primary session for ${primaryPhone}...`));
         await initSession(primaryPhone, { usePairingCode: true });
+    } else if (dbSessions && dbSessions.length > 0) {
+        hasExistingSession = true;
+        primaryPhone = dbSessions[0].phone_number.replace(/[^0-9]/g, '');
+        console.log(chalk.yellow(`\n🔄 Initializing primary session from database for ${primaryPhone}...`));
+        await initSession(primaryPhone, { usePairingCode: true });
+    } else {
+        console.log(chalk.bold.cyan('\n=========================================='));
+        console.log(chalk.bold.yellow('📱 No active WhatsApp session detected!'));
+        console.log(chalk.bold.cyan('==========================================\n'));
+
+        const defaultNum = settings.ownerNumber ? settings.ownerNumber.replace(/[^0-9]/g, '') : '';
+        const promptText = defaultNum 
+            ? chalk.bold.green(`👉 Please enter your WhatsApp number with country code (e.g. 923xxxxxxxxx) [Default: ${defaultNum}]: `)
+            : chalk.bold.green('👉 Please enter your WhatsApp number with country code (e.g. 923xxxxxxxxx): ');
+
+        let phone = await question(promptText);
+        phone = phone.trim();
+        if (!phone && defaultNum) {
+            phone = defaultNum;
+        }
+        phone = phone.replace(/[^0-9]/g, '');
+
+        while (!phone || phone.length < 10) {
+            console.log(chalk.red('❌ Invalid phone number. Please enter digits with country code (e.g., 923232391033):'));
+            phone = await question(chalk.bold.green('👉 Phone Number: '));
+            phone = phone.trim().replace(/[^0-9]/g, '');
+        }
+
+        primaryPhone = phone;
+        console.log(chalk.yellow(`\n🔄 Requesting pairing code for ${primaryPhone}...`));
+        await initSession(primaryPhone, { usePairingCode: true, isOwner: true });
     }
 
     // Initialize/Resume other existing sessions
     if (dbConnected) {
         const pairedSessions = dbSessions || [];
-        if (pairedSessions.length > 0) {
-            console.log(chalk.blue(`📡 Resuming ${pairedSessions.length} active sessions from database...`));
-            for (const session of pairedSessions) {
+        const otherSessions = pairedSessions.filter(s => s.phone_number.replace(/[^0-9]/g, '') !== primaryPhone);
+        if (otherSessions.length > 0) {
+            console.log(chalk.blue(`📡 Resuming ${otherSessions.length} active sessions from database...`));
+            for (const session of otherSessions) {
                 const dbPhone = session.phone_number.replace(/[^0-9]/g, '');
-                if (dbPhone !== primaryPhone) {
-                    initSession(dbPhone).catch(err => console.error(`Failed to init session ${dbPhone}:`, err));
-                    await new Promise(resolve => setTimeout(resolve, 2000)); // 2s stagger
-                }
-            }
-        } else {
-            const localSessions = fs.readdirSync(sessionDir).filter(name => fs.lstatSync(path.join(sessionDir, name)).isDirectory());
-            const sessionsToLoad = localSessions.filter(phone => phone !== primaryPhone);
-            if (sessionsToLoad.length > 0) {
-                console.log(chalk.blue(`📁 Resuming ${sessionsToLoad.length} sessions from local storage...`));
-                for (const phone of sessionsToLoad) {
-                    initSession(phone).catch(err => console.error(`Failed to init local session ${phone}:`, err));
-                    await new Promise(resolve => setTimeout(resolve, 2000)); // 2s stagger
-                }
-            } else {
-                console.log(chalk.red('❌ No other active sessions found.'));
+                initSession(dbPhone).catch(err => console.error(`Failed to init session ${dbPhone}:`, err));
+                await new Promise(resolve => setTimeout(resolve, 2000)); // 2s stagger
             }
         }
-    } else {
-        const localSessions = fs.readdirSync(sessionDir).filter(name => fs.lstatSync(path.join(sessionDir, name)).isDirectory());
+    } else if (fs.existsSync(sessionDir)) {
+        const localSessions = fs.readdirSync(sessionDir).filter(name => {
+            const folderPath = path.join(sessionDir, name);
+            return fs.lstatSync(folderPath).isDirectory() && fs.existsSync(path.join(folderPath, 'creds.json'));
+        });
         const sessionsToLoad = localSessions.filter(phone => phone !== primaryPhone);
         if (sessionsToLoad.length > 0) {
             console.log(chalk.blue(`📁 Loading ${sessionsToLoad.length} sessions from local storage...`));
@@ -2010,8 +2088,6 @@ async function launch() {
                 initSession(phone).catch(err => console.error(`Failed to init local session ${phone}:`, err));
                 await new Promise(resolve => setTimeout(resolve, 2000)); // 2s stagger
             }
-        } else {
-            console.log(chalk.red('❌ No other active sessions found.'));
         }
     }
 
@@ -2051,4 +2127,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { launch };
+module.exports = { launch, handleMessages };

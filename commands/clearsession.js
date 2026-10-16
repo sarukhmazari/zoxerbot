@@ -3,17 +3,7 @@ const path = require('path');
 const os = require('os');
 const isOwnerOrSudo = require('../lib/isOwner');
 
-const channelInfo = {
-    contextInfo: {
-        forwardingScore: 999,
-        isForwarded: true,
-        forwardedNewsletterMessageInfo: {
-            newsletterJid: '',
-            newsletterName: 'ZOXER BOT',
-            serverMessageId: -1
-        }
-    }
-};
+const channelInfo = {};
 
 async function clearSessionCommand(sock, chatId, msg) {
     try {

@@ -2,6 +2,7 @@
 const path = require('path');
 
 const dataFilePath = path.join(__dirname, '..', 'data', 'messageCount.json');
+const botSettingsFilePath = path.join(__dirname, '..', 'data', 'bot-settings.json');
 
 function loadMessageCounts() {
     if (fs.existsSync(dataFilePath)) {
@@ -12,11 +13,16 @@ function loadMessageCounts() {
 }
 
 function saveMessageCounts(messageCounts) {
-    fs.writeFileSync(dataFilePath, JSON.stringify(messageCounts, null, 2));
+    const modeValue = typeof messageCounts.isPublic === 'boolean' ? { isPublic: messageCounts.isPublic } : {};
+    const safeCounts = { ...modeValue, ...messageCounts };
+    delete safeCounts.isPublic;
+    const finalObject = { ...modeValue, ...safeCounts };
+    fs.writeFileSync(dataFilePath, JSON.stringify(finalObject, null, 2));
 }
 
 function incrementMessageCount(groupId, userId) {
     const messageCounts = loadMessageCounts();
+    const modeValue = typeof messageCounts.isPublic === 'boolean' ? { isPublic: messageCounts.isPublic } : {};
 
     if (!messageCounts[groupId]) {
         messageCounts[groupId] = {};
@@ -28,7 +34,8 @@ function incrementMessageCount(groupId, userId) {
 
     messageCounts[groupId][userId] += 1;
 
-    saveMessageCounts(messageCounts);
+    const finalCounts = { ...modeValue, ...messageCounts };
+    fs.writeFileSync(dataFilePath, JSON.stringify(finalCounts, null, 2));
 }
 
 function topMembers(sock, chatId, isGroup) {

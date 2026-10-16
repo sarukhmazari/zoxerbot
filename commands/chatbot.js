@@ -29,9 +29,9 @@ function saveUserGroupData(data) {
     }
 }
 
-// Add random delay between 2-5 seconds
+// Keep typing indicator lightweight so bot responses stay fast.
 function getRandomDelay() {
-    return Math.floor(Math.random() * 3000) + 2000;
+    return 200;
 }
 
 // Add typing indicator
@@ -281,10 +281,7 @@ async function handleChatbotResponse(sock, chatId, message, userMessage, senderI
             return;
         }
 
-        // Add human-like delay before sending response
-        await new Promise(resolve => setTimeout(resolve, getRandomDelay()));
-
-        // Send response as a reply with proper context
+        // Send response immediately without artificial delay.
         await sock.sendMessage(chatId, {
             text: response
         }, {

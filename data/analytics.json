@@ -1,10 +1,10 @@
 {
   "sessions": {
     "923232391033": {
-      "sent": 1651,
-      "received": 9429,
-      "likes": 0,
-      "connectedAt": 1787423315293
+      "sent": 1924,
+      "received": 12170,
+      "likes": 3,
+      "connectedAt": 1792182817237
     },
     "923193746753": {
       "sent": 10,
@@ -23,7 +23,13 @@
       "received": 36,
       "likes": 0,
       "connectedAt": 1787375457138
+    },
+    "923217377002": {
+      "sent": 10,
+      "received": 110,
+      "likes": 0,
+      "connectedAt": 1792134868820
     }
   },
-  "totalLikes": 0
+  "totalLikes": 3
 }

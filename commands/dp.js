@@ -1,53 +1,74 @@
 const { jidNormalizedUser } = require('@whiskeysockets/baileys');
 
+async function resolveProfileJid(sock, message) {
+    const context = message.message?.extendedTextMessage?.contextInfo || {};
+    const directJid = context.participant || context.mentionedJid?.[0] || message.key?.participant || message.key?.remoteJid;
+    if (!directJid) return null;
+
+    const normalized = jidNormalizedUser(directJid);
+    if (!normalized) return null;
+
+    const candidates = new Set([
+        normalized,
+        normalized.replace(/@lid$/i, '@s.whatsapp.net'),
+        normalized.replace(/@s\.whatsapp\.net$/i, '@lid'),
+        normalized.includes('@') ? normalized : `${normalized}@s.whatsapp.net`
+    ]);
+
+    for (const candidate of candidates) {
+        if (candidate && candidate.includes('@')) return candidate;
+    }
+    return normalized;
+}
+
 async function dpCommand(sock, chatId, message) {
     try {
-        let jid;
-
-        // 1. Check if it's a reply
-        const quoted = message.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-        const quotedParticipant = message.message?.extendedTextMessage?.contextInfo?.participant;
-
-        if (quotedParticipant) {
-            jid = jidNormalizedUser(quotedParticipant);
-        } 
-        // 2. Check for mentions
-        else if (message.message?.extendedTextMessage?.contextInfo?.mentionedJid?.length > 0) {
-            jid = jidNormalizedUser(message.message.extendedTextMessage.contextInfo.mentionedJid[0]);
-        }
-        // 3. Fallback to sender
-        else {
-            jid = jidNormalizedUser(message.key.participant || message.key.remoteJid);
-        }
-
+        const jid = await resolveProfileJid(sock, message);
         if (!jid) {
             return await sock.sendMessage(chatId, { text: '❌ Could not determine user JID.' }, { quoted: message });
         }
 
-        try {
-            const ppUrl = await sock.profilePictureUrl(jid, 'image');
+        let ppUrl = null;
+        const profileFetchers = [
+            () => sock.profilePictureUrl?.(jid, 'image'),
+            () => sock.profilePictureUrl?.(jid),
+            () => sock.getProfilePicture?.(jid),
+            () => sock.getUserProfilePicture?.(jid)
+        ];
 
-            if (!ppUrl) {
-                return await sock.sendMessage(chatId, { text: '❌ This user does not have a profile picture or their privacy settings prevent me from seeing it.' }, { quoted: message });
+        for (const fetcher of profileFetchers) {
+            try {
+                ppUrl = await fetcher();
+                if (ppUrl) break;
+            } catch (e) {
+                ppUrl = null;
             }
-
-            await sock.sendMessage(chatId, {
-                image: { url: ppUrl },
-                caption: `📸 Profile Picture of @${jid.split('@')[0]}`,
-                contextInfo: {
-                    ...(global.channelInfo?.contextInfo || {}),
-                    mentionedJid: [jid]
-                }
-            }, { quoted: message });
-
-        } catch (ppError) {
-            console.error('Error fetching PP:', ppError);
-            await sock.sendMessage(chatId, { text: '❌ Could not fetch profile picture. It might be private or the user has no DP.' }, { quoted: message });
         }
+
+        if (!ppUrl) {
+            return await sock.sendMessage(chatId, {
+                text: '❌ This user does not have a profile picture or their privacy settings prevent me from seeing it.'
+            }, { quoted: message });
+        }
+
+        const imageResponse = await fetch(ppUrl);
+        if (!imageResponse.ok) {
+            throw new Error(`Profile fetch failed with status ${imageResponse.status}`);
+        }
+
+        const buffer = Buffer.from(await imageResponse.arrayBuffer());
+        await sock.sendMessage(chatId, {
+            image: buffer,
+            caption: `📸 Profile Picture of @${jid.split('@')[0]}`,
+            contextInfo: {
+                ...(global.channelInfo?.contextInfo || {}),
+                mentionedJid: [jid]
+            }
+        }, { quoted: message });
 
     } catch (error) {
         console.error('DP Command Error:', error);
-        await sock.sendMessage(chatId, { text: '❌ An error occurred while processing the command.' }, { quoted: message });
+        await sock.sendMessage(chatId, { text: '❌ Could not fetch profile picture. It might be private or the user has no DP.' }, { quoted: message });
     }
 }
 

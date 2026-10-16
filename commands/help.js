@@ -1,6 +1,7 @@
 const settings = require('../settings');
 const os = require('os');
 const fs = require('fs');
+const path = require('path');
 
 async function helpCommand(sock, chatId, message) {
     // Calculate Uptime
@@ -13,8 +14,13 @@ async function helpCommand(sock, chatId, message) {
     // Get Bot Mode
     let isPublic = true;
     try {
-        if (fs.existsSync('./data/messageCount.json')) {
-            const data = JSON.parse(fs.readFileSync('./data/messageCount.json'));
+        const modePath = './data/bot-settings.json';
+        const legacyPath = './data/messageCount.json';
+        if (fs.existsSync(modePath)) {
+            const data = JSON.parse(fs.readFileSync(modePath, 'utf8'));
+            if (typeof data.isPublic === 'boolean') isPublic = data.isPublic;
+        } else if (fs.existsSync(legacyPath)) {
+            const data = JSON.parse(fs.readFileSync(legacyPath, 'utf8'));
             if (typeof data.isPublic === 'boolean') isPublic = data.isPublic;
         }
     } catch (e) { }
@@ -29,7 +35,7 @@ async function helpCommand(sock, chatId, message) {
     const helpMessage = `⌬───────────⏣───────────⌬
 〔 𝗭𝗢𝗫𝗘𝗥  𝗕𝗢𝗧 〕
 ⌬───────────⏣───────────⌬
-⧫ 𝙾𝚆𝙽𝙴𝚁: 𝙼𝙰𝚉𝙰𝚁𝙸 𝚃𝙴𝙰𝙼
+⧫ 𝙾𝚆𝙽𝙴𝚁: 𝚉𝚘𝚡𝚎𝚛
 ⧫ 𝚂𝚃𝙰𝚃𝚄𝚂: ${mode}
 ⧫ 𝙿𝚁𝙴𝙵𝙸𝚇: [ . ]
 ⧫ 𝚁𝚄𝙽𝚃𝙸𝙼𝙴: ${uptime}
@@ -45,15 +51,15 @@ async function helpCommand(sock, chatId, message) {
 ⬖ .𝚜𝚘𝚛𝚊
 
 ◈──『 𝙾𝚆𝙽𝙴𝚁 𝙲𝙾𝙼𝙼𝙰𝙽𝙳𝚂 』──◈
-⬖ .𝚖𝚘𝚍𝚎
+⬖ .𝚖𝚘𝚍𝚎 𝚙𝚞𝚋𝚕𝚒𝚌 / 𝚙𝚛𝚒𝚟𝚊𝚝𝚎
 ⬖ .𝚌𝚕𝚎𝚊𝚛𝚜𝚎𝚜𝚜𝚒𝚘𝚗
 ⬖ .𝚞𝚙𝚍𝚊𝚝𝚎
-⬖ .𝚊𝚞𝚝𝚘𝚜𝚝𝚊𝚝𝚞𝚜
-⬖ .𝚊𝚞𝚝𝚘𝚛𝚎𝚊𝚌𝚝
-⬖ .𝚊𝚞𝚝𝚘𝚝𝚢𝚙𝚒𝚗𝚐
-⬖ .𝚊𝚞𝚝𝚘𝚛𝚎𝚊𝚍
-⬖ .𝚊𝚗𝚝𝚒𝚌𝚊𝚕𝚕
-⬖ .𝚙𝚖𝚋𝚕𝚘𝚌𝚔𝚎𝚛
+⬖ .𝚊𝚞𝚝𝚘𝚜𝚝𝚊𝚝𝚞𝚜 𝚘𝚗 / 𝚘𝚏𝚏
+⬖ .𝚊𝚞𝚝𝚘𝚛𝚎𝚊𝚌𝚝 𝚘𝚗 / 𝚘𝚏𝚏
+⬖ .𝚊𝚞𝚝𝚘𝚝𝚢𝚙𝚒𝚗𝚐 𝚘𝚗 / 𝚘𝚏𝚏
+⬖ .𝚊𝚞𝚝𝚘𝚛𝚎𝚊𝚍 𝚘𝚗 / 𝚘𝚏𝚏
+⬖ .𝚊𝚗𝚝𝚒𝚌𝚊𝚕𝚕 𝚘𝚗 / 𝚘𝚏𝚏
+⬖ .𝚙𝚖𝚋𝚕𝚘𝚌𝚔𝚎𝚛 𝚘𝚗 / 𝚘𝚏𝚏
 ⬖ .𝚜𝚎𝚝𝚖𝚎𝚗𝚞𝚍𝚙
 ⬖ .𝚜𝚎𝚝𝚖𝚎𝚗𝚞𝚖𝚞𝚜𝚒𝚌
 ⬖ .𝚜𝚎𝚝𝚍𝚙𝚍 / .𝚜𝚎𝚝𝚍𝚙𝚍𝚎𝚏𝚊𝚞𝚕𝚝
@@ -79,10 +85,8 @@ async function helpCommand(sock, chatId, message) {
 ⬖ .𝚌𝚞𝚜𝚝𝚘𝚖 𝚜𝚎𝚝
 ⬖ .𝚌𝚞𝚜𝚝𝚘𝚖 𝚘𝚏𝚏
 ⬖ .𝚌𝚞𝚜𝚝𝚘𝚖 𝚕𝚒𝚜𝚝
-⬖ .𝚊𝚞𝚝𝚘𝚋𝚕𝚘𝚌𝚔 𝚘𝚗
-⬖ .𝚊𝚞𝚝𝚘𝚋𝚕𝚘𝚌𝚔 𝚘𝚏𝚏
-⬖ .𝚊𝚗𝚝𝚒𝚜𝚙𝚊𝚖 𝚘𝚗
-⬖ .𝚊𝚗𝚝𝚒𝚜𝚙𝚊𝚖 𝚘𝚏𝚏
+⬖ .𝚊𝚞𝚝𝚘𝚋𝚕𝚘𝚌𝚔 𝚘𝚗 / 𝚘𝚏𝚏
+⬖ .𝚊𝚗𝚝𝚒𝚜𝚙𝚊𝚖 𝚘𝚗 / 𝚘𝚏𝚏
 ⬖ .𝚙𝚘𝚕𝚕
 
 ◈──『 𝙳𝙾𝚆𝙽𝙻𝙾𝙰𝙳𝙴𝚁𝚂 』──◈
@@ -152,48 +156,34 @@ async function helpCommand(sock, chatId, message) {
 ⬖ .𝚍𝚙
 
 ⌬───────────⏣───────────⌬
-✨ 𝙿𝚘𝚠𝚎𝚛𝚎𝚍 𝚋𝚢 〔 𝗠𝗔𝗭𝗔𝗥𝗜  ＡＩ  𝗕𝗢𝗧 〕 ✨
+✨ 𝙿𝚘𝚠𝚎𝚛𝚎𝚍 𝚋𝚢 〔 𝗭𝗢𝗫𝗘𝗥  ＡＩ  𝗕𝗢𝗧 〕 ✨
 ⌬───────────⏣───────────⌬`;
 
-    const audioCandidates = [
-        './assets/musics/MUSIC.mp3',
-        './assets/audio.mp3',
-        './assets/audio.mpeg'
-    ];
-
-    const musicPath = audioCandidates.find(p => fs.existsSync(p));
-
     try {
-        let menuMsg;
+        const candidatePaths = [
+            path.resolve(__dirname, '..', 'zoxer.jfif'),
+            path.resolve(__dirname, '..', 'assets', 'images', 'custom_menu.jpg'),
+            path.resolve(__dirname, '..', 'assets', 'images', 'banner.png'),
+            path.resolve(__dirname, '..', 'assets', 'images', 'logo.png')
+        ];
+        const customMenuPath = candidatePaths.find(filePath => fs.existsSync(filePath));
 
-        try {
-            const customMenuPath = './assets/images/custom_menu.jpg';
-            const imageSource = fs.existsSync(customMenuPath)
-                ? fs.readFileSync(customMenuPath)
-                : { url: 'https://mazari-api.sarukhmazari1.workers.dev/api/cdn/mz-dzqgy9' };
-
-            menuMsg = await sock.sendMessage(chatId, {
-                image: imageSource,
-                caption: helpMessage,
-                contextInfo: global.promotionInfo?.contextInfo
-            }, { quoted: message });
-        } catch (imageError) {
-            console.error('Failed to send menu with URL image, falling back to text:', imageError);
-            menuMsg = await sock.sendMessage(chatId, {
-                text: helpMessage,
-                contextInfo: global.promotionInfo?.contextInfo
-            }, { quoted: message });
+        if (customMenuPath) {
+            try {
+                await sock.sendMessage(chatId, {
+                    image: fs.readFileSync(customMenuPath),
+                    mimetype: 'image/jpeg',
+                    caption: helpMessage
+                }, { quoted: message });
+                return;
+            } catch (imgErr) {
+                console.error('Failed to send menu with image, sending text:', imgErr);
+            }
         }
 
-        if (musicPath) {
-            await sock.sendMessage(chatId, {
-                audio: fs.readFileSync(musicPath),
-                mimetype: 'audio/mpeg',
-                fileName: 'menu_music.mp3',
-                ptt: false,
-                contextInfo: global.promotionInfo?.contextInfo
-            }, { quoted: menuMsg });
-        }
+        await sock.sendMessage(chatId, {
+            text: helpMessage
+        }, { quoted: message });
     } catch (error) {
         console.error('Error in help command:', error);
         await sock.sendMessage(chatId, { text: helpMessage }, { quoted: message });

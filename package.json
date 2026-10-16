@@ -2,7 +2,7 @@
   "name": "zoxerbot",
   "version": "1.0.0",
   "description": "Professional WhatsApp Bot by Sarukh Zoxer",
-  "main": "server.js",
+  "main": "main.js",
   "scripts": {
     "build": "echo Build Complete",
     "start": "node main.js",

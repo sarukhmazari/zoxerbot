@@ -26,21 +26,11 @@ async function autoreadCommand(sock, chatId, message, args = []) {
         
         if (!message.key.fromMe && !isOwner) {
             await sock.sendMessage(chatId, {
-                text: '❌ This command is only available for the owner!',
-                contextInfo: {
-                    forwardingScore: 1,
-                    isForwarded: true,
-                    forwardedNewsletterMessageInfo: {
-                        newsletterJid: '',
-                        newsletterName: 'ZOXER BOT',
-                        serverMessageId: -1
-                    }
-                }
-            });
+                text: '❌ This command is only available for the owner!'
+            }, { quoted: message });
             return;
         }
 
-        
         // Initialize or read config
         const config = initConfig();
         
@@ -53,17 +43,8 @@ async function autoreadCommand(sock, chatId, message, args = []) {
                 config.enabled = false;
             } else {
                 await sock.sendMessage(chatId, {
-                    text: '❌ Invalid option! Use: .autoread on/off',
-                    contextInfo: {
-                        forwardingScore: 1,
-                        isForwarded: true,
-                        forwardedNewsletterMessageInfo: {
-                            newsletterJid: '',
-                            newsletterName: 'ZOXER BOT',
-                            serverMessageId: -1
-                        }
-                    }
-                });
+                    text: '❌ Invalid option! Use: .autoread on/off'
+                }, { quoted: message });
                 return;
             }
         } else {
@@ -76,32 +57,14 @@ async function autoreadCommand(sock, chatId, message, args = []) {
         
         // Send confirmation message
         await sock.sendMessage(chatId, {
-            text: `✅ Auto-read has been ${config.enabled ? 'enabled' : 'disabled'}!`,
-            contextInfo: {
-                forwardingScore: 1,
-                isForwarded: true,
-                forwardedNewsletterMessageInfo: {
-                    newsletterJid: '',
-                    newsletterName: 'ZOXER BOT',
-                    serverMessageId: -1
-                }
-            }
-        });
+            text: `✅ Auto-read has been ${config.enabled ? 'enabled' : 'disabled'}!`
+        }, { quoted: message });
         
     } catch (error) {
         console.error('Error in autoread command:', error);
         await sock.sendMessage(chatId, {
-            text: '❌ Error processing command!',
-            contextInfo: {
-                forwardingScore: 1,
-                isForwarded: true,
-                forwardedNewsletterMessageInfo: {
-                    newsletterJid: '',
-                    newsletterName: 'ZOXER BOT',
-                    serverMessageId: -1
-                }
-            }
-        });
+            text: '❌ Error processing command!'
+        }, { quoted: message });
     }
 }
 

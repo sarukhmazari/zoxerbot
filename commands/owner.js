@@ -16,8 +16,7 @@ END:VCARD`.trim();
             contacts: [
                 { vcard: vcard }
             ] 
-        },
-        contextInfo: global.promotionInfo?.contextInfo
+        }
     });
 }
 

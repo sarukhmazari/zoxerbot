@@ -1,145 +1,178 @@
 const { igdl } = require("ruhend-scraper");
+const axios = require('axios');
 
-// Store processed message IDs to prevent duplicates
+// Store processed message IDs to prevent duplicate handling
 const processedMessages = new Set();
 
-// Function to extract unique media URLs with simple deduplication
+// Download media as buffer to reduce bot load — no direct URL streaming
+async function downloadMediaBuffer(url) {
+    const res = await axios.get(url, {
+        responseType: 'arraybuffer',
+        timeout: 60000,
+        maxContentLength: 100 * 1024 * 1024, // 100MB max
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+        },
+        validateStatus: s => s >= 200 && s < 300,
+    });
+    return Buffer.from(res.data);
+}
+
+// Simple deduplication by URL
 function extractUniqueMedia(mediaData) {
     const uniqueMedia = [];
     const seenUrls = new Set();
-    
+
     for (const media of mediaData) {
         if (!media.url) continue;
-        
-        // Only check for exact URL duplicates
         if (!seenUrls.has(media.url)) {
             seenUrls.add(media.url);
             uniqueMedia.push(media);
         }
     }
-    
-    return uniqueMedia;
-}
 
-// Function to validate media URL
-function isValidMediaUrl(url) {
-    if (!url || typeof url !== 'string') return false;
-    
-    // Accept any URL that looks like media
-    return url.includes('cdninstagram.com') || 
-           url.includes('instagram') || 
-           url.includes('http');
+    return uniqueMedia;
 }
 
 async function instagramCommand(sock, chatId, message) {
     try {
-        // Check if message has already been processed
-        if (processedMessages.has(message.key.id)) {
-            return;
-        }
-        
-        // Add message ID to processed set
+        // Prevent duplicate processing
+        if (processedMessages.has(message.key.id)) return;
         processedMessages.add(message.key.id);
-        
-        // Clean up old message IDs after 5 minutes
-        setTimeout(() => {
-            processedMessages.delete(message.key.id);
-        }, 5 * 60 * 1000);
+        setTimeout(() => processedMessages.delete(message.key.id), 5 * 60 * 1000);
 
-        const text = message.message?.conversation || message.message?.extendedTextMessage?.text;
-        
-        if (!text) {
-            return await sock.sendMessage(chatId, { 
-                text: "Please provide an Instagram link for the video."
-            });
+        const text = (
+            message.message?.conversation ||
+            message.message?.extendedTextMessage?.text ||
+            ''
+        );
+
+        // Extract the URL from the message text
+        const urlArg = text.trim().split(/\s+/).slice(1).join(' ').trim();
+
+        if (!urlArg) {
+            return await sock.sendMessage(chatId, {
+                text: "📥 Instagram post/reel ka link den.\nExample: .igd https://www.instagram.com/reel/..."
+            }, { quoted: message });
         }
 
-        // Check for various Instagram URL formats
+        // Validate Instagram URL patterns
         const instagramPatterns = [
-            /https?:\/\/(?:www\.)?instagram\.com\//,
-            /https?:\/\/(?:www\.)?instagr\.am\//,
             /https?:\/\/(?:www\.)?instagram\.com\/p\//,
             /https?:\/\/(?:www\.)?instagram\.com\/reel\//,
-            /https?:\/\/(?:www\.)?instagram\.com\/tv\//
+            /https?:\/\/(?:www\.)?instagram\.com\/reels\//,
+            /https?:\/\/(?:www\.)?instagram\.com\/tv\//,
+            /https?:\/\/(?:www\.)?instagr\.am\//,
         ];
 
-        const isValidUrl = instagramPatterns.some(pattern => pattern.test(text));
-        
+        const isValidUrl = instagramPatterns.some(pattern => pattern.test(urlArg));
+
         if (!isValidUrl) {
-            return await sock.sendMessage(chatId, { 
-                text: "That is not a valid Instagram link. Please provide a valid Instagram post, reel, or video link."
-            });
+            return await sock.sendMessage(chatId, {
+                text: "❌ Ye valid Instagram link nahi hai.\nSirf post, reel ya IGTV ka link den.\n\nExample: .igd https://www.instagram.com/reel/..."
+            }, { quoted: message });
         }
 
+        // React with loading
         await sock.sendMessage(chatId, {
             react: { text: '🔄', key: message.key }
         });
 
-        const downloadData = await igdl(text);
-        
+        let downloadData;
+        try {
+            downloadData = await igdl(urlArg);
+        } catch (scrapeErr) {
+            console.error('IGDL scraper error:', scrapeErr?.message || scrapeErr);
+            await sock.sendMessage(chatId, { react: { text: '❌', key: message.key } });
+            return await sock.sendMessage(chatId, {
+                text: "❌ Instagram se download nahi ho saka. Post private ho sakti hai ya link expire ho gaya."
+            }, { quoted: message });
+        }
+
         if (!downloadData || !downloadData.data || downloadData.data.length === 0) {
-            return await sock.sendMessage(chatId, { 
-                text: "❌ No media found at the provided link. The post might be private or the link is invalid."
-            });
+            await sock.sendMessage(chatId, { react: { text: '❌', key: message.key } });
+            return await sock.sendMessage(chatId, {
+                text: "❌ Koi media nahi mila. Post private ho sakti hai ya link ghalat hai."
+            }, { quoted: message });
         }
 
-        const mediaData = downloadData.data;
-        
-        // Simple deduplication - just remove exact URL duplicates
-        const uniqueMedia = extractUniqueMedia(mediaData);
-        
-        // Limit to maximum 20 unique media items
-        const mediaToDownload = uniqueMedia.slice(0, 20);
-        
+        // Deduplicate and limit
+        const uniqueMedia = extractUniqueMedia(downloadData.data);
+        const mediaToDownload = uniqueMedia.slice(0, 10); // Max 10 items to keep bot light
+
         if (mediaToDownload.length === 0) {
-            return await sock.sendMessage(chatId, { 
-                text: "❌ No valid media found to download. This might be a private post or the scraper failed."
-            });
+            await sock.sendMessage(chatId, { react: { text: '❌', key: message.key } });
+            return await sock.sendMessage(chatId, {
+                text: "❌ Koi downloadable media nahi mila."
+            }, { quoted: message });
         }
 
-        // Download all media silently without status messages
+        let successCount = 0;
+
         for (let i = 0; i < mediaToDownload.length; i++) {
             try {
                 const media = mediaToDownload[i];
                 const mediaUrl = media.url;
 
-                // Check if URL ends with common video extensions
-                const isVideo = /\.(mp4|mov|avi|mkv|webm)$/i.test(mediaUrl) || 
-                              media.type === 'video' || 
-                              text.includes('/reel/') || 
-                              text.includes('/tv/');
+                // Download as buffer first to avoid streaming issues
+                const buffer = await downloadMediaBuffer(mediaUrl);
+
+                // Determine if video or image
+                const isVideo = /\.(mp4|mov|avi|mkv|webm)/i.test(mediaUrl) ||
+                    media.type === 'video' ||
+                    urlArg.includes('/reel/') ||
+                    urlArg.includes('/tv/');
+
+                const caption = i === 0 ? '𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗗 𝗕𝗬 𝗠𝗔𝗭𝗔𝗥𝗜 𝗕𝗢𝗧' : '';
 
                 if (isVideo) {
                     await sock.sendMessage(chatId, {
-                        video: { url: mediaUrl },
+                        video: buffer,
                         mimetype: "video/mp4",
-                        caption: "𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗗 𝗕𝗬 𝗠𝗔𝗭𝗔𝗥𝗜 𝗕𝗢𝗧",
+                        caption,
                         ...global.channelInfo
                     }, { quoted: message });
                 } else {
                     await sock.sendMessage(chatId, {
-                        image: { url: mediaUrl },
-                        caption: "𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗗 𝗕𝗬 𝗠𝗔𝗭𝗔𝗥𝗜 𝗕𝗢𝗧",
+                        image: buffer,
+                        caption,
                         ...global.channelInfo
                     }, { quoted: message });
                 }
-                
-                // Add small delay between downloads to prevent rate limiting
+
+                successCount++;
+
+                // Small delay between multiple media items
                 if (i < mediaToDownload.length - 1) {
-                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    await new Promise(resolve => setTimeout(resolve, 1500));
                 }
-                
+
             } catch (mediaError) {
-                console.error(`Error downloading media ${i + 1}:`, mediaError);
-                // Continue with next media if one fails
+                console.error(`IG download media ${i + 1} error:`, mediaError?.message || mediaError);
+                // Continue with next item silently
             }
         }
 
+        if (successCount > 0) {
+            await sock.sendMessage(chatId, { react: { text: '✅', key: message.key } });
+        } else {
+            await sock.sendMessage(chatId, { react: { text: '❌', key: message.key } });
+            await sock.sendMessage(chatId, {
+                text: "❌ Media download fail ho gaya. Thori dair baad try kren."
+            }, { quoted: message });
+        }
+
     } catch (error) {
-        console.error('Error in Instagram command:', error);
-        await sock.sendMessage(chatId, { 
-            text: "❌ An error occurred while processing the Instagram request. Please try again."
-        });
+        console.error('Error in Instagram download command:', error);
+        try {
+            await sock.sendMessage(chatId, { react: { text: '❌', key: message.key } });
+            await sock.sendMessage(chatId, {
+                text: "❌ Instagram request process karne mein error aya. Dobara try kren."
+            }, { quoted: message });
+        } catch (_) {
+            // Silently ignore send errors in error handler
+        }
     }
 }
 
