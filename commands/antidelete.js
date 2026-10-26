@@ -86,9 +86,15 @@ async function handleAntideleteCommand(sock, chatId, message, match) {
     const config = loadAntideleteConfig();
 
     if (!match) {
-        return sock.sendMessage(chatId, {
-            text: `*ANTIDELETE SETUP*\n\nCurrent Status: ${config.enabled ? '✅ Enabled' : '❌ Disabled'}\n\n*.antidelete on* - Enable\n*.antidelete off* - Disable`
-        }, {quoted: message});
+        const reply = `╭─ *🗑️ 𝗭𝗢𝗫𝗘𝗥 𝗔𝗡𝗧𝗜𝗗𝗘𝗟𝗘𝗧𝗘*
+┃
+┃  ◈ *𝗦𝗧𝗔𝗧𝗨𝗦*
+┃  ◆ *${config.enabled ? 'Enabled (ON)' : 'Disabled (OFF)'}*
+┃  ◈ *𝗨𝗦𝗔𝗚𝗘*
+┃  ◆ *.antidelete on  |  .antidelete off*
+┃
+╰───────────────`;
+        return sock.sendMessage(chatId, { text: reply }, { quoted: message });
     }
 
     if (match === 'on') {
@@ -96,11 +102,19 @@ async function handleAntideleteCommand(sock, chatId, message, match) {
     } else if (match === 'off') {
         config.enabled = false;
     } else {
-        return sock.sendMessage(chatId, { text: '*Invalid command. Use .antidelete to see usage.*' }, {quoted:message});
+        return sock.sendMessage(chatId, { text: '❌ Invalid option! Use: `.antidelete on` or `.antidelete off`' }, { quoted: message });
     }
 
     saveAntideleteConfig(config);
-    return sock.sendMessage(chatId, { text: `*Antidelete ${match === 'on' ? 'enabled' : 'disabled'}*` }, {quoted:message});
+    const reply = `╭─ *🗑️ 𝗭𝗢𝗫𝗘𝗥 𝗔𝗡𝗧𝗜𝗗𝗘𝗟𝗘𝗧𝗘*
+┃
+┃  ◈ *𝗦𝗧𝗔𝗧𝗨𝗦*
+┃  ◆ *${config.enabled ? 'Enabled (ON)' : 'Disabled (OFF)'}*
+┃  ◈ *𝗗𝗘𝗦𝗖𝗥𝗜𝗣𝗧𝗜𝗢𝗡*
+┃  ◆ *Deleted messages will be recovered and logged.*
+┃
+╰───────────────`;
+    return sock.sendMessage(chatId, { text: reply }, { quoted: message });
 }
 
 // Store incoming messages (also handles anti-view-once by forwarding immediately)
@@ -238,17 +252,19 @@ async function handleMessageRevocation(sock, revocationMessage) {
             day: '2-digit', month: '2-digit', year: 'numeric'
         });
 
-        let text = `*🔰 ANTIDELETE REPORT 🔰*\n\n` +
-            `*🗑️ Deleted By:* @${deletedBy.split('@')[0]}\n` +
-            `*👤 Sender:* @${senderName}\n` +
-            `*📱 Number:* ${sender}\n` +
-            `*🕒 Time:* ${time}\n`;
-
-        if (groupName) text += `*👥 Group:* ${groupName}\n`;
-
-        if (original.content) {
-            text += `\n*💬 Deleted Message:*\n${original.content}`;
-        }
+        let text = `╭─ *🗑️ 𝗔𝗡𝗧𝗜𝗗𝗘𝗟𝗘𝗧𝗘 𝗥𝗘𝗣𝗢𝗥𝗧*
+┃
+┃  ◈ *𝗗𝗘𝗟𝗘𝗧𝗘𝗗 𝗕𝗬*
+┃  ◆ *@${deletedBy.split('@')[0]}*
+┃  ◈ *𝗦𝗘𝗡𝗗𝗘𝗥*
+┃  ◆ *@${senderName}*
+┃  ◈ *𝗧𝗜𝗠𝗘*
+┃  ◆ *${time}*` + (groupName ? `\n┃  ◈ *𝗚𝗥𝗢𝗨𝗣*\n┃  ◆ *${groupName}*` : '') + `
+┃
+┣─〔 ◈ 𝗠𝗘𝗦𝗦𝗔𝗚𝗘 〕
+┃  ${original.content ? original.content.split('\n').join('\n┃  ') : '_[Media Attachment]_'}
+┃
+╰───────────────`;
 
         await sock.sendMessage(ownerNumber, {
             text,

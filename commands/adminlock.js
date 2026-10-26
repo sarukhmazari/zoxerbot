@@ -17,13 +17,37 @@ async function adminlockCommand(sock, chatId, senderId, args, message) {
         const action = args[0]?.toLowerCase();
         if (action === 'on') {
             await setAdminlock(chatId, true);
-            await sock.sendMessage(chatId, { text: '🔒 *Admin Lock is now ON.*\n\nAny unauthorized admin who tries to promote someone will be demoted immediately.' }, { quoted: message });
+            const text = `╭─ *🛡️ 𝗔𝗗𝗠𝗜𝗡 𝗟𝗢𝗖𝗞*
+┃
+┃  ◈ *𝗦𝗧𝗔𝗧𝗨𝗦*
+┃  ◆ *Enabled (ON)*
+┃  ◈ *𝗣𝗥𝗢𝗧𝗘𝗖𝗧𝗜𝗢𝗡*
+┃  ◆ *Active: Unauthorized promotions will be reversed immediately.*
+┃
+╰───────────────`;
+            await sock.sendMessage(chatId, { text }, { quoted: message });
         } else if (action === 'off') {
             await setAdminlock(chatId, false);
-            await sock.sendMessage(chatId, { text: '🔓 *Admin Lock is now OFF.*' }, { quoted: message });
+            const text = `╭─ *🛡️ 𝗔𝗗𝗠𝗜𝗡 𝗟𝗢𝗖𝗞*
+┃
+┃  ◈ *𝗦𝗧𝗔𝗧𝗨𝗦*
+┃  ◆ *Disabled (OFF)*
+┃  ◈ *𝗣𝗥𝗢𝗧𝗘𝗖𝗧𝗜𝗢𝗡*
+┃  ◆ *Inactive: Promotion restrictions are turned off.*
+┃
+╰───────────────`;
+            await sock.sendMessage(chatId, { text }, { quoted: message });
         } else {
             const status = await getAdminlock(chatId);
-            await sock.sendMessage(chatId, { text: `🛡️ *Admin Lock Status:* ${status ? 'ON' : 'OFF'}` }, { quoted: message });
+            const text = `╭─ *🛡️ 𝗔𝗗𝗠𝗜𝗡 𝗟𝗢𝗖𝗞*
+┃
+┃  ◈ *𝗦𝗧𝗔𝗧𝗨𝗦*
+┃  ◆ *${status ? 'Enabled (ON)' : 'Disabled (OFF)'}*
+┃  ◈ *𝗨𝗦𝗔𝗚𝗘*
+┃  ◆ *.adminlock on  |  .adminlock off*
+┃
+╰───────────────`;
+            await sock.sendMessage(chatId, { text }, { quoted: message });
         }
     } catch (error) {
         console.error('Error in adminlock command:', error);
@@ -102,8 +126,16 @@ async function handleAdminlockPromotion(sock, groupId, participants, author) {
             
             await sock.groupParticipantsUpdate(groupId, demoteList, 'demote');
             
+            const alertText = `╭─ *🚨 𝗔𝗗𝗠𝗜𝗡 𝗟𝗢𝗖𝗞 𝗔𝗟𝗘𝗥𝗧*
+┃
+┃  ◈ *𝗩𝗜𝗢𝗟𝗔𝗧𝗜𝗢𝗡*
+┃  ◆ *Unauthorized promotion detected!*
+┃  ◈ *𝗔𝗖𝗧𝗜𝗢𝗡 𝗧𝗔𝗞𝗘𝗡*
+┃  ◆ *Promoter @${authorPhone} and targets demoted.*
+┃
+╰───────────────`;
             await sock.sendMessage(groupId, { 
-                text: `🚨 *ADMIN LOCK:* Unauthorized promotion detected.\n\nPromoter @${authorPhone} and their unauthorized targets have been demoted by the bot safety system.`,
+                text: alertText,
                 mentions: demoteList.filter(j => j.includes('@'))
             });
         }

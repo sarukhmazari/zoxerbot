@@ -21,22 +21,38 @@ async function statusCommand(sock, chatId, senderId, args, message) {
     const setting = args[0]?.toLowerCase();
 
     if (setting === 'on') {
-        // Status ON = Mentions allowed
         await setStatusRestriction(chatId, true);
-        await sock.sendMessage(chatId, { 
-            text: '✅ *Group Mention Status: ON*\n\nEveryone is now allowed to mention this group in their status updates.' 
-        }, { quoted: message });
+        const reply = `╭─ *📊 𝗚𝗥𝗢𝗨𝗣 𝗦𝗧𝗔𝗧𝗨𝗦*
+┃
+┃  ◈ *𝗠𝗘𝗡𝗧𝗜𝗢𝗡 𝗦𝗧𝗔𝗧𝗨𝗦*
+┃  ◆ *Enabled (ON)*
+┃  ◈ *𝗣𝗘𝗥𝗠𝗜𝗦𝗦𝗜𝗢𝗡*
+┃  ◆ *All members may mention this group in statuses.*
+┃
+╰───────────────`;
+        await sock.sendMessage(chatId, { text: reply }, { quoted: message });
     } else if (setting === 'off') {
-        // Status OFF = Mentions restricted
         await setStatusRestriction(chatId, false);
-        await sock.sendMessage(chatId, { 
-            text: '❌ *Group Mention Status: OFF*\n\nMembers are now restricted from mentioning this group in their status updates. Bot will monitor and act on violations.' 
-        }, { quoted: message });
+        const reply = `╭─ *📊 𝗚𝗥𝗢𝗨𝗣 𝗦𝗧𝗔𝗧𝗨𝗦*
+┃
+┃  ◈ *𝗠𝗘𝗡𝗧𝗜𝗢𝗡 𝗦𝗧𝗔𝗧𝗨𝗦*
+┃  ◆ *Restricted (OFF)*
+┃  ◈ *𝗣𝗘𝗥𝗠𝗜𝗦𝗦𝗜𝗢𝗡*
+┃  ◆ *Group mentions in statuses are restricted.*
+┃
+╰───────────────`;
+        await sock.sendMessage(chatId, { text: reply }, { quoted: message });
     } else {
         const current = await getStatusRestriction(chatId);
-        await sock.sendMessage(chatId, { 
-            text: `📊 *Current Status:* ${current ? 'ON (Allowed)' : 'OFF (Restricted)'}\n\n*Usage:* \n.status on - Allow mentions\n.status off - Restrict mentions` 
-        }, { quoted: message });
+        const reply = `╭─ *📊 𝗚𝗥𝗢𝗨𝗣 𝗦𝗧𝗔𝗧𝗨𝗦*
+┃
+┃  ◈ *𝗖𝗨𝗥𝗥𝗘𝗡𝗧 𝗦𝗧𝗔𝗧𝗨𝗦*
+┃  ◆ *${current ? 'Enabled (ON)' : 'Restricted (OFF)'}*
+┃  ◈ *𝗨𝗦𝗔𝗚𝗘*
+┃  ◆ *.status on  |  .status off*
+┃
+╰───────────────`;
+        await sock.sendMessage(chatId, { text: reply }, { quoted: message });
     }
 }
 

@@ -24,12 +24,17 @@ async function pingCommand(sock, chatId, message) {
         const uptimeInSeconds = process.uptime();
         const uptimeFormatted = formatTime(uptimeInSeconds);
 
-        const botInfo = `
-┏━━〔 🤖 𝐌𝐀𝐙𝐀𝐑𝐈 𝐁𝐎𝐓 〕━━┓
-┃ 🚀 Ping     : ${Math.round((Date.now() - start) / 2)} ms
-┃ ⏱️ Uptime   : ${uptimeFormatted}
-┃ 🔖 Version  : v${settings.version}
-┗━━━━━━━━━━━━━━━━━━━┛`.trim();
+        const speed = Math.round((Date.now() - start) / 2);
+        const botInfo = `╭─ *𝗭𝗢𝗫𝗘𝗥 𝗣𝗜𝗡𝗚*
+┃
+┃  ◈ *𝗦𝗣𝗘𝗘𝗗*
+┃  ◆ *${speed} ms*
+┃  ◈ *𝗨𝗣𝗧𝗜𝗠𝗘*
+┃  ◆ *${uptimeFormatted}*
+┃  ◈ *𝗩𝗘𝗥𝗦𝗜𝗢𝗡*
+┃  ◆ *v${settings.version}*
+┃
+╰───────────────`;
 
         // Reply with the detailed bot info only
         await sock.sendMessage(chatId, { text: botInfo }, { quoted: message });

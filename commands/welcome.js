@@ -77,7 +77,19 @@ async function handleJoinEvent(sock, id, participants) {
                     hour12: true
                 });
                 
-                finalMessage = `╭╼━≪•𝙽𝙴𝚆 𝙼𝙴𝙼𝙱𝙴𝚁•≫━╾╮\n┃𝚆𝙴𝙻𝙲𝙾𝙼𝙴: @${displayName} 👋\n┃Member count: #${groupMetadata.participants.length}\n┃𝚃𝙸𝙼𝙴: ${timeString}⏰\n╰━━━━━━━━━━━━━━━╯\n\n*@${displayName}* Welcome to *${groupName}*! 🎉\n*Group 𝙳𝙴𝚂𝙲𝚁𝙸𝙿𝚃𝙸𝙾𝙽*\n${groupDesc}\n\n> *ᴘᴏᴡᴇʀᴇᴅ ʙʏ ZOXER BOT*`;
+                finalMessage = `╭─ *👋 𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗧𝗢 ${groupName.toUpperCase()}*
+┃
+┃  ◈ *𝗡𝗘𝗪 𝗠𝗘𝗠𝗕𝗘𝗥*
+┃  ◆ *@${displayName}*
+┃  ◈ *𝗠𝗘𝗠𝗕𝗘𝗥 𝗖𝗢𝗨𝗡𝗧*
+┃  ◆ *#${groupMetadata.participants.length}*
+┃  ◈ *𝗝𝗢𝗜𝗡𝗘𝗗*
+┃  ◆ *${timeString}*
+┃
+┣─〔 ◈ 𝗚𝗥𝗢𝗨𝗣 𝗜𝗡𝗙𝗢 〕
+┃  ${groupDesc ? groupDesc.split('\n').slice(0, 4).join('\n┃  ') : 'Welcome! Follow all group rules and enjoy.'}
+┃
+╰───────────────`;
             }
             
             // Try to send with image first (always try images)

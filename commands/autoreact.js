@@ -72,14 +72,22 @@ async function autoreactCommand(sock, chatId, message, args = []) {
         const action = args.length > 0 ? args[0].toLowerCase() : null;
 
         if (action === 'status') {
-            const dmStatus = config.autoreact_dm ? '✅ ENABLED' : '❌ DISABLED';
+            const dmStatus = config.autoreact_dm ? 'Enabled (ON)' : 'Disabled (OFF)';
             const thisGroupStatus = isGroup 
-                ? (config.enabledGroups.includes(chatId) ? '✅ ENABLED' : '❌ DISABLED')
+                ? (config.enabledGroups.includes(chatId) ? 'Enabled (ON)' : 'Disabled (OFF)')
                 : 'N/A (Private Chat)';
 
-            return sock.sendMessage(chatId, {
-                text: `📊 *Auto-React Status:*\n\n• *Private DMs:* ${dmStatus}\n• *This Chat:* ${thisGroupStatus}\n• *Active Groups:* ${config.enabledGroups.length}`
-            }, { quoted: message });
+            const reply = `╭─ *⚡ 𝗭𝗢𝗫𝗘𝗥 𝗔𝗨𝗧𝗢-𝗥𝗘𝗔𝗖𝗧*
+┃
+┃  ◈ *𝗗𝗠 𝗦𝗧𝗔𝗧𝗨𝗦*
+┃  ◆ *${dmStatus}*
+┃  ◈ *𝗧𝗛𝗜𝗦 𝗖𝗛𝗔𝗧*
+┃  ◆ *${thisGroupStatus}*
+┃  ◈ *𝗔𝗖𝗧𝗜𝗩𝗘 𝗚𝗥𝗢𝗨𝗣𝗦*
+┃  ◆ *${config.enabledGroups.length}*
+┃
+╰───────────────`;
+            return sock.sendMessage(chatId, { text: reply }, { quoted: message });
         }
 
         if (action && !['on', 'enable', 'off', 'disable'].includes(action)) {
@@ -102,15 +110,15 @@ async function autoreactCommand(sock, chatId, message, args = []) {
             config.autoreact_dm = isEnabled;
             fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 
-            if (isEnabled) {
-                await sock.sendMessage(chatId, {
-                    text: '✅ *Auto-React ENABLED for Personal/Private Chats (DMs)!*\n\n📌 *Scope:* Bot will only react to personal messages received in private chat.\n🚫 Groups will NOT be affected.'
-                }, { quoted: message });
-            } else {
-                await sock.sendMessage(chatId, {
-                    text: '❌ *Auto-React DISABLED for Personal/Private Chats (DMs)!*'
-                }, { quoted: message });
-            }
+            const reply = `╭─ *⚡ 𝗭𝗢𝗫𝗘𝗥 𝗔𝗨𝗧𝗢-𝗥𝗘𝗔𝗖𝗧*
+┃
+┃  ◈ *𝗖𝗛𝗔𝗧 𝗦𝗖𝗢𝗣𝗘*
+┃  ◆ *Personal DMs (Direct Messages)*
+┃  ◈ *𝗦𝗧𝗔𝗧𝗨𝗦*
+┃  ◆ *${isEnabled ? 'Enabled (ON)' : 'Disabled (OFF)'}*
+┃
+╰───────────────`;
+            await sock.sendMessage(chatId, { text: reply }, { quoted: message });
         } else {
             // Context: Group Chat
             const isAlreadyActive = config.enabledGroups.includes(chatId);
@@ -133,15 +141,15 @@ async function autoreactCommand(sock, chatId, message, args = []) {
 
             fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 
-            if (isEnabled) {
-                await sock.sendMessage(chatId, {
-                    text: '✅ *Auto-React ENABLED for this group only!*\n\n📌 *Scope:* Bot will only react to messages inside THIS group.\n🚫 Personal DMs and other groups will NOT be reacted to.'
-                }, { quoted: message });
-            } else {
-                await sock.sendMessage(chatId, {
-                    text: '❌ *Auto-React DISABLED for this group!*'
-                }, { quoted: message });
-            }
+            const reply = `╭─ *⚡ 𝗭𝗢𝗫𝗘𝗥 𝗔𝗨𝗧𝗢-𝗥𝗘𝗔𝗖𝗧*
+┃
+┃  ◈ *𝗖𝗛𝗔𝗧 𝗦𝗖𝗢𝗣𝗘*
+┃  ◆ *This Group Only*
+┃  ◈ *𝗦𝗧𝗔𝗧𝗨𝗦*
+┃  ◆ *${isEnabled ? 'Enabled (ON)' : 'Disabled (OFF)'}*
+┃
+╰───────────────`;
+            await sock.sendMessage(chatId, { text: reply }, { quoted: message });
         }
     } catch (error) {
         console.error("AutoReact command error:", error);

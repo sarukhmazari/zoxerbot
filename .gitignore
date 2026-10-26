@@ -25,3 +25,10 @@ tmp/
 # OS specific files
 .DS_Store
 Thumbs.db
+
+# Independent frontend repo
+frontend/
+
+# Local backups & scratch
+backups/
+scratch/

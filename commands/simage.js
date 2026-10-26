@@ -1,46 +1,66 @@
-const Jimp = require('jimp');
-const fs = require('fs');
-const fsPromises = require('fs/promises');
-const fse = require('fs-extra');
-const path = require('path');
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const { Jimp } = require('jimp');
+const { downloadMediaMessage, downloadContentFromMessage } = require('@whiskeysockets/baileys');
 
-const tempDir = './temp';
-if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
-
-const scheduleFileDeletion = (filePath) => {
-    setTimeout(async () => {
-        try {
-            await fse.remove(filePath);
-            console.log(`File deleted: ${filePath}`);
-        } catch (error) {
-            console.error(`Failed to delete file:`, error);
-        }
-    }, 10000); // 5 minutes
-};
-
-const convertStickerToImage = async (sock, quotedMessage, chatId) => {
+async function convertStickerToImage(sock, quotedMessage, chatId, message) {
     try {
-        const stickerMessage = quotedMessage.stickerMessage;
+        const quotedInfo = message?.message?.extendedTextMessage?.contextInfo;
+        const targetMessage = {
+            key: {
+                remoteJid: chatId,
+                id: quotedInfo?.stanzaId || message?.key?.id,
+                participant: quotedInfo?.participant
+            },
+            message: quotedMessage || quotedInfo?.quotedMessage
+        };
+
+        const stickerMessage = targetMessage.message?.stickerMessage;
         if (!stickerMessage) {
-            await sock.sendMessage(chatId, { text: 'Reply to a sticker with .simage to convert it.' });
-            return;
+            return await sock.sendMessage(chatId, { 
+                text: '⚠️ Please reply to a *sticker* with *.simage* to convert it to an image.' 
+            }, { quoted: message });
         }
 
-        const stream = await downloadContentFromMessage(stickerMessage, 'sticker');
-        let buffer = Buffer.from([]);
-        for await (const chunk of stream) buffer = Buffer.concat([buffer, chunk]);
+        await sock.sendMessage(chatId, { react: { text: '⏳', key: message?.key || targetMessage.key } });
 
-        // Process with Jimp
+        let buffer = null;
+        try {
+            buffer = await downloadMediaMessage(targetMessage, 'buffer', {}, {
+                reuploadRequest: sock.updateMediaMessage
+            });
+        } catch (_) {}
+
+        if (!buffer || buffer.length === 0) {
+            const stream = await downloadContentFromMessage(stickerMessage, 'sticker');
+            let chunks = [];
+            for await (const chunk of stream) chunks.push(chunk);
+            buffer = Buffer.concat(chunks);
+        }
+
+        // Process with Jimp 1.x
         const image = await Jimp.read(buffer);
-        const imageBuffer = await image.getBufferAsync(Jimp.MIME_PNG);
+        const imageBuffer = await image.getBuffer('image/png');
 
-        await sock.sendMessage(chatId, { image: imageBuffer, caption: 'Here is the converted image!' });
+        const caption = `╭─ *🖼️ 𝗦𝗧𝗜𝗖𝗞𝗘𝗥 𝗧𝗢 𝗜𝗠𝗔𝗚𝗘*
+┃
+┃  ◈ *𝗦𝗧𝗔𝗧𝗨𝗦*
+┃  ◆ *Converted successfully!*
+┃  ◈ *𝗙𝗢𝗥𝗠𝗔𝗧*
+┃  ◆ *PNG High Definition*
+┃
+╰───────────────`;
+
+        await sock.sendMessage(chatId, { 
+            image: imageBuffer, 
+            caption: caption,
+            mimetype: 'image/png' 
+        }, { quoted: message });
+
+        await sock.sendMessage(chatId, { react: { text: '✅', key: message?.key || targetMessage.key } });
 
     } catch (error) {
         console.error('Error converting sticker to image:', error);
-        await sock.sendMessage(chatId, { text: 'An error occurred while converting the sticker.' });
+        await sock.sendMessage(chatId, { text: `❌ Failed to convert sticker to image: ${error.message}` }, { quoted: message });
     }
-};
+}
 
 module.exports = convertStickerToImage;

@@ -1,4 +1,4 @@
-﻿const fs = require('fs');
+const fs = require('fs');
 const path = require('path');
 
 const warningsFilePath = path.join(__dirname, '../data/warnings.json');
@@ -20,9 +20,19 @@ async function warningsCommand(sock, chatId, mentionedJidList) {
     }
 
     const userToCheck = mentionedJidList[0];
+    const userClean = userToCheck.split('@')[0].split(':')[0];
     const warningCount = warnings[userToCheck] || 0;
 
-    await sock.sendMessage(chatId, { text: `User has ${warningCount} warning(s).` });
+    const reply = `╭─ *⚠️ 𝗨𝗦𝗘𝗥 𝗪𝗔𝗥𝗡𝗜𝗡𝗚𝗦*
+┃
+┃  ◈ *𝗨𝗦𝗘𝗥*
+┃  ◆ *@${userClean}*
+┃  ◈ *𝗦𝗧𝗥𝗜𝗞𝗘𝗦*
+┃  ◆ *${warningCount} / 3*
+┃
+╰───────────────`;
+
+    await sock.sendMessage(chatId, { text: reply, mentions: [userToCheck] });
 }
 
 module.exports = warningsCommand;

@@ -1,4 +1,4 @@
-﻿const { setAntilink, getAntilink, removeAntilink } = require('../lib/index');
+const { setAntilink, getAntilink, removeAntilink } = require('../lib/index');
 
 const prefix = '.';
 
@@ -54,7 +54,18 @@ async function handleAntilinkCommand(sock, chatId, userMessage, senderId, isSend
         const action = args[0];
 
         if (!action) {
-            const usage = `\`\`\`ANTILINK SETUP\n\n${prefix}antilink on\n${prefix}antilink set delete | kick | warn\n${prefix}antilink get\n${prefix}antilink off\n\`\`\``;
+            const usage = `╭─ *🛡️ 𝗭𝗢𝗫𝗘𝗥 𝗔𝗡𝗧𝗜𝗟𝗜𝗡𝗞*
+┃
+┃  ◈ *𝗧𝗨𝗥𝗡 𝗢𝗡*
+┃  ◆ *.antilink on*
+┃  ◈ *𝗧𝗨𝗥𝗡 𝗢𝗙𝗙*
+┃  ◆ *.antilink off*
+┃  ◈ *𝗦𝗘𝗧 𝗔𝗖𝗧𝗜𝗢𝗡*
+┃  ◆ *.antilink set delete | kick | warn*
+┃  ◈ *𝗩𝗜𝗘𝗪 𝗖𝗢𝗡𝗙𝗜𝗚*
+┃  ◆ *.antilink get*
+┃
+╰───────────────`;
             await sock.sendMessage(chatId, { text: usage }, { quoted: message });
             return;
         }
@@ -106,9 +117,15 @@ async function handleAntilinkCommand(sock, chatId, userMessage, senderId, isSend
 
             case 'get': {
                 const config = await getAntilink(chatId, 'on');
-                await sock.sendMessage(chatId, {
-                    text: `*_Antilink Configuration:_*\nStatus: ${config?.enabled ? 'ON' : 'OFF'}\nAction: ${config?.action || 'Not set'}`
-                }, { quoted: message });
+                const reply = `╭─ *🛡️ 𝗭𝗢𝗫𝗘𝗥 𝗔𝗡𝗧𝗜𝗟𝗜𝗡𝗞*
+┃
+┃  ◈ *𝗦𝗧𝗔𝗧𝗨𝗦*
+┃  ◆ *${config?.enabled ? 'Enabled (ON)' : 'Disabled (OFF)'}*
+┃  ◈ *𝗔𝗖𝗧𝗜𝗢𝗡*
+┃  ◆ *${(config?.action || 'delete').toUpperCase()}*
+┃
+╰───────────────`;
+                await sock.sendMessage(chatId, { text: reply }, { quoted: message });
                 break;
             }
 
@@ -162,8 +179,16 @@ async function handleLinkDetection(sock, chatId, message, userMessage, senderId)
         if (act === 'kick') {
             try {
                 await sock.groupParticipantsUpdate(chatId, [senderId], 'remove');
+                const kickAlert = `╭─ *🚨 𝗔𝗡𝗧𝗜𝗟𝗜𝗡𝗞 𝗔𝗟𝗘𝗥𝗧*
+┃
+┃  ◈ *𝗨𝗦𝗘𝗥 𝗥𝗘𝗠𝗢𝗩𝗘𝗗*
+┃  ◆ *${tag}*
+┃  ◈ *𝗩𝗜𝗢𝗟𝗔𝗧𝗜𝗢𝗡*
+┃  ◆ *Posting prohibited links.*
+┃
+╰───────────────`;
                 await sock.sendMessage(chatId, {
-                    text: `${tag} has been removed for posting a link.`,
+                    text: kickAlert,
                     ...mention,
                 });
             } catch (err) {
@@ -171,8 +196,16 @@ async function handleLinkDetection(sock, chatId, message, userMessage, senderId)
             }
         } else {
             // delete / warn
+            const warnAlert = `╭─ *⚠️ 𝗔𝗡𝗧𝗜𝗟𝗜𝗡𝗞 𝗪𝗔𝗥𝗡𝗜𝗡𝗚*
+┃
+┃  ◈ *𝗪𝗔𝗥𝗡𝗘𝗗 𝗨𝗦𝗘𝗥*
+┃  ◆ *${tag}*
+┃  ◈ *𝗩𝗜𝗢𝗟𝗔𝗧𝗜𝗢𝗡*
+┃  ◆ *Sharing links is strictly prohibited in this group.*
+┃
+╰───────────────`;
             await sock.sendMessage(chatId, {
-                text: `Warning! ${tag}, posting links is not allowed.`,
+                text: warnAlert,
                 ...mention,
             });
         }

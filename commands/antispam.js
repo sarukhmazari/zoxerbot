@@ -22,18 +22,51 @@ async function antispamCommand(sock, chatId, senderId, args, message) {
 
     if (!isNaN(limit) && limit > 1) {
         await setAntispam(chatId, limit);
-        await sock.sendMessage(chatId, { text: `✅ Group Anti-Spam is now *ENABLED* with a threshold of *${limit}* messages.\n\nUsers sending ${limit} identical messages consecutively will be kicked.` }, { quoted: message });
+        const text = `╭─ *🛡️ 𝗭𝗢𝗫𝗘𝗥 𝗔𝗡𝗧𝗜-𝗦𝗣𝗔𝗠*
+┃
+┃  ◈ *𝗦𝗧𝗔𝗧𝗨𝗦*
+┃  ◆ *Enabled (ON)*
+┃  ◈ *𝗧𝗛𝗥𝗘𝗦𝗛𝗢𝗟𝗗*
+┃  ◆ *${limit} Consecutive Messages*
+┃  ◈ *𝗣𝗘𝗡𝗔𝗟𝗧𝗬*
+┃  ◆ *Auto-Kick on spam violation.*
+┃
+╰───────────────`;
+        await sock.sendMessage(chatId, { text }, { quoted: message });
     } else if (action === 'on') {
-        await setAntispam(chatId, true); // This will default to 3
-        await sock.sendMessage(chatId, { text: '✅ Group Anti-Spam is now *ENABLED* for this group.\n\nUsers who send 3 identical messages consecutively will be kicked.' }, { quoted: message });
+        await setAntispam(chatId, true);
+        const text = `╭─ *🛡️ 𝗭𝗢𝗫𝗘𝗥 𝗔𝗡𝗧𝗜-𝗦𝗣𝗔𝗠*
+┃
+┃  ◈ *𝗦𝗧𝗔𝗧𝗨𝗦*
+┃  ◆ *Enabled (ON)*
+┃  ◈ *𝗧𝗛𝗥𝗘𝗦𝗛𝗢𝗟𝗗*
+┃  ◆ *3 Consecutive Messages*
+┃  ◈ *𝗣𝗘𝗡𝗔𝗟𝗧𝗬*
+┃  ◆ *Auto-Kick on spam violation.*
+┃
+╰───────────────`;
+        await sock.sendMessage(chatId, { text }, { quoted: message });
     } else if (action === 'off') {
         await setAntispam(chatId, false);
-        await sock.sendMessage(chatId, { text: '✅ Group Anti-Spam is now *DISABLED*.' }, { quoted: message });
+        const text = `╭─ *🛡️ 𝗭𝗢𝗫𝗘𝗥 𝗔𝗡𝗧𝗜-𝗦𝗣𝗔𝗠*
+┃
+┃  ◈ *𝗦𝗧𝗔𝗧𝗨𝗦*
+┃  ◆ *Disabled (OFF)*
+┃
+╰───────────────`;
+        await sock.sendMessage(chatId, { text }, { quoted: message });
     } else {
         const currentLimit = await getAntispam(chatId);
-        await sock.sendMessage(chatId, { 
-            text: `🛡️ *Anti-Spam Status:* ${currentLimit ? `ENABLED (Limit: ${currentLimit})` : 'DISABLED'}\n\nUsage:\n.antispam on\n.antispam off\n.antispam <number>` 
-        }, { quoted: message });
+        const text = `╭─ *🛡️ 𝗭𝗢𝗫𝗘𝗥 𝗔𝗡𝗧𝗜-𝗦𝗣𝗔𝗠*
+┃
+┃  ◈ *𝗖𝗨𝗥𝗥𝗘𝗡𝗧 𝗦𝗧𝗔𝗧𝗨𝗦*
+┃  ◆ *${currentLimit ? `Enabled (Threshold: ${currentLimit})` : 'Disabled (OFF)'}*
+┃  ◈ *𝗨𝗦𝗔𝗚𝗘*
+┃  ◆ *.antispam on  |  .antispam off*
+┃  ◆ *.antispam <limit>*
+┃
+╰───────────────`;
+        await sock.sendMessage(chatId, { text }, { quoted: message });
     }
 }
 

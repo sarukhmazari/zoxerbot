@@ -1,23 +1,38 @@
-﻿const fetch = require('node-fetch');
+const axios = require('axios');
+
+const fallbackNights = [
+    "May your dreams be sweeter than honey and softer than moonlight. Good night!",
+    "Close your eyes, clear your mind, and let the gentle stars guide you into peaceful sleep. Good night!",
+    "Wishing you restful sleep and beautiful dreams. Tomorrow is a brand new blessing!",
+    "As the day turns into night, keep your worries out of sight. Sleep tight and sweet dreams!",
+    "The stars are shining just for you tonight. Sleep peacefully and wake up energized!"
+];
 
 async function goodnightCommand(sock, chatId, message) {
-    try {
-        const shizokeys = 'shizo';
-        const res = await fetch(`https://shizoapi.onrender.com/api/texts/lovenight?apikey=${shizokeys}`);
-        
-        if (!res.ok) {
-            throw await res.text();
-        }
-        
-        const json = await res.json();
-        const goodnightMessage = json.result;
+    let nightText = '';
 
-        // Send the goodnight message
-        await sock.sendMessage(chatId, { text: goodnightMessage }, { quoted: message });
-    } catch (error) {
-        console.error('Error in goodnight command:', error);
-        await sock.sendMessage(chatId, { text: '❌ Failed to get goodnight message. Please try again later!' }, { quoted: message });
+    try {
+        const res = await axios.get('https://shizoapi.onrender.com/api/texts/lovenight?apikey=shizo', {
+            timeout: 3000,
+            headers: { 'Accept-Encoding': 'identity', 'User-Agent': 'Mozilla/5.0' }
+        });
+        if (res.data && res.data.result && typeof res.data.result === 'string') {
+            nightText = res.data.result.trim();
+        }
+    } catch (_) {}
+
+    if (!nightText) {
+        nightText = fallbackNights[Math.floor(Math.random() * fallbackNights.length)];
     }
+
+    const reply = `╭─ *🌙 𝗭𝗢𝗫𝗘𝗥 𝗚𝗢𝗢𝗗𝗡𝗜𝗚𝗛𝗧*
+┃
+┃  ◈ *𝗪𝗜𝗦𝗛*
+┃  ◆ *"${nightText}"*
+┃
+╰───────────────`;
+
+    await sock.sendMessage(chatId, { text: reply }, { quoted: message });
 }
 
-module.exports = { goodnightCommand }; 
+module.exports = { goodnightCommand };

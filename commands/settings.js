@@ -1,4 +1,4 @@
-﻿const fs = require('fs');
+const fs = require('fs');
 
 function readJsonSafe(path, fallback) {
     try {
@@ -49,42 +49,42 @@ async function settingsCommand(sock, chatId, message) {
         const antitagCfg = groupId ? (userGroupData.antitag && userGroupData.antitag[groupId]) : null;
 
         const lines = [];
-        lines.push('*BOT SETTINGS*');
-        lines.push('');
-        lines.push(`• Mode: ${mode.isPublic ? 'Public' : 'Private'}`);
-        lines.push(`• Auto Status: ${autoStatus.enabled ? 'ON' : 'OFF'}`);
-        lines.push(`• Autoread: ${autoread.enabled ? 'ON' : 'OFF'}`);
-        lines.push(`• Autotyping: ${autotyping.enabled ? 'ON' : 'OFF'}`);
-        lines.push(`• PM Blocker: ${pmblocker.enabled ? 'ON' : 'OFF'}`);
-        lines.push(`• Anticall: ${anticall.enabled ? 'ON' : 'OFF'}`);
-        lines.push(`• Auto Reaction: ${autoReaction ? 'ON' : 'OFF'}`);
+        lines.push('╭─ *⚙️ 𝗭𝗢𝗫𝗘𝗥 𝗦𝗘𝗧𝗧𝗜𝗡𝗚𝗦*');
+        lines.push('┃');
+        lines.push('┣─〔 ◈ 𝗚𝗟𝗢𝗕𝗔𝗟 𝗖𝗢𝗡𝗙𝗜𝗚 〕');
+        lines.push(`┃  ◈ *Mode:* ${mode.isPublic ? 'Public' : 'Private'}`);
+        lines.push(`┃  ◈ *Auto Status:* ${autoStatus.enabled ? 'ON' : 'OFF'}`);
+        lines.push(`┃  ◈ *Autoread:* ${autoread.enabled ? 'ON' : 'OFF'}`);
+        lines.push(`┃  ◈ *Autotyping:* ${autotyping.enabled ? 'ON' : 'OFF'}`);
+        lines.push(`┃  ◈ *PM Blocker:* ${pmblocker.enabled ? 'ON' : 'OFF'}`);
+        lines.push(`┃  ◈ *Anticall:* ${anticall.enabled ? 'ON' : 'OFF'}`);
+        lines.push(`┃  ◈ *Auto React:* ${autoReaction ? 'ON' : 'OFF'}`);
         if (groupId) {
-            lines.push('');
-            lines.push(`Group: ${groupId}`);
+            lines.push('┃');
+            lines.push('┣─〔 ◈ 𝗚𝗥𝗢𝗨𝗣 𝗖𝗢𝗡𝗙𝗜𝗚 〕');
             if (antilinkOn) {
                 const al = userGroupData.antilink[groupId];
-                lines.push(`• Antilink: ON (action: ${al.action || 'delete'})`);
+                lines.push(`┃  ◈ *Antilink:* ON (${al.action || 'delete'})`);
             } else {
-                lines.push('• Antilink: OFF');
+                lines.push('┃  ◈ *Antilink:* OFF');
             }
             if (antibadwordOn) {
                 const ab = userGroupData.antibadword[groupId];
-                lines.push(`• Antibadword: ON (action: ${ab.action || 'delete'})`);
+                lines.push(`┃  ◈ *Antibadword:* ON (${ab.action || 'delete'})`);
             } else {
-                lines.push('• Antibadword: OFF');
+                lines.push('┃  ◈ *Antibadword:* OFF');
             }
-            lines.push(`• Welcome: ${welcomeOn ? 'ON' : 'OFF'}`);
-            lines.push(`• Goodbye: ${goodbyeOn ? 'ON' : 'OFF'}`);
-            lines.push(`• Chatbot: ${chatbotOn ? 'ON' : 'OFF'}`);
+            lines.push(`┃  ◈ *Welcome:* ${welcomeOn ? 'ON' : 'OFF'}`);
+            lines.push(`┃  ◈ *Goodbye:* ${goodbyeOn ? 'ON' : 'OFF'}`);
+            lines.push(`┃  ◈ *Chatbot:* ${chatbotOn ? 'ON' : 'OFF'}`);
             if (antitagCfg && antitagCfg.enabled) {
-                lines.push(`• Antitag: ON (action: ${antitagCfg.action || 'delete'})`);
+                lines.push(`┃  ◈ *Antitag:* ON (${antitagCfg.action || 'delete'})`);
             } else {
-                lines.push('• Antitag: OFF');
+                lines.push('┃  ◈ *Antitag:* OFF');
             }
-        } else {
-            lines.push('');
-            lines.push('Note: Per-group settings will be shown when used inside a group.');
         }
+        lines.push('┃');
+        lines.push('╰───────────────');
 
         await sock.sendMessage(chatId, { text: lines.join('\n') }, { quoted: message });
     } catch (error) {

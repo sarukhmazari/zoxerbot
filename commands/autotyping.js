@@ -55,10 +55,15 @@ async function autotypingCommand(sock, chatId, message, args = []) {
         // Save updated configuration
         fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
         
-        // Send confirmation message
-        await sock.sendMessage(chatId, {
-            text: `✅ Auto-typing has been ${config.enabled ? 'enabled' : 'disabled'}!`
-        }, { quoted: message });
+        const reply = `╭─ *⌨️ 𝗭𝗢𝗫𝗘𝗥 𝗔𝗨𝗧𝗢-𝗧𝗬𝗣𝗜𝗡𝗚*
+┃
+┃  ◈ *𝗦𝗧𝗔𝗧𝗨𝗦*
+┃  ◆ *${config.enabled ? 'Enabled (ON)' : 'Disabled (OFF)'}*
+┃  ◈ *𝗗𝗘𝗦𝗖𝗥𝗜𝗣𝗧𝗜𝗢𝗡*
+┃  ◆ *Simulates live typing presence on incoming activity.*
+┃
+╰───────────────`;
+        await sock.sendMessage(chatId, { text: reply }, { quoted: message });
         
     } catch (error) {
         console.error('Error in autotyping command:', error);

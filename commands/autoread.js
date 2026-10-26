@@ -55,10 +55,15 @@ async function autoreadCommand(sock, chatId, message, args = []) {
         // Save updated configuration
         fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
         
-        // Send confirmation message
-        await sock.sendMessage(chatId, {
-            text: `✅ Auto-read has been ${config.enabled ? 'enabled' : 'disabled'}!`
-        }, { quoted: message });
+        const reply = `╭─ *👁️ 𝗭𝗢𝗫𝗘𝗥 𝗔𝗨𝗧𝗢-𝗥𝗘𝗔𝗗*
+┃
+┃  ◈ *𝗦𝗧𝗔𝗧𝗨𝗦*
+┃  ◆ *${config.enabled ? 'Enabled (ON)' : 'Disabled (OFF)'}*
+┃  ◈ *𝗗𝗘𝗦𝗖𝗥𝗜𝗣𝗧𝗜𝗢𝗡*
+┃  ◆ *Automatically marks received messages as read.*
+┃
+╰───────────────`;
+        await sock.sendMessage(chatId, { text: reply }, { quoted: message });
         
     } catch (error) {
         console.error('Error in autoread command:', error);
@@ -138,11 +143,13 @@ async function handleAutoread(sock, message) {
             
             // We don't call sock.readMessages() here, so the message stays unread in the UI
             return false; // Indicates message was not marked as read
-        } else {
             // For regular messages, mark as read normally
-            const key = { remoteJid: message.key.remoteJid, id: message.key.id, participant: message.key.participant };
-            await sock.readMessages([key]);
-            //console.log('✅ Marked message as read from ' + (message.key.participant || message.key.remoteJid).split('@')[0]);
+            try {
+                if (typeof sock.readMessages === 'function') {
+                    const key = { remoteJid: message.key.remoteJid, id: message.key.id, participant: message.key.participant };
+                    await sock.readMessages([key]);
+                }
+            } catch (_) {}
             return true; // Indicates message was marked as read
         }
     }

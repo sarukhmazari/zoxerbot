@@ -14,14 +14,10 @@ const settings = {
   logicUrl: process.env.LOGIC_URL || "", // Add your remote bin direct download link here
   updateZipUrl: "",
   channelLink: "https://whatsapp.com/channel/0029VbBRITODzgTGQhZSFT3P",
-  channelLink2: "https://whatsapp.com/channel/0029Vb6GUj8BPzjOWNfnhm1B",
   newsletterJid: "120363404139113188@newsletter",
   connectionImagePath: process.env.CONNECTION_IMAGE_PATH || "./zoxer.jfif",
   newsletters: [
-    '120363404139113188@newsletter',
-    '120363421676417753@newsletter',
-    '120363408484963246@newsletter',
-    '120363400318546224@newsletter'
+    '120363404139113188@newsletter'
   ]
 };
 

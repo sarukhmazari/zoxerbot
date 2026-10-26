@@ -1,23 +1,41 @@
-﻿const fetch = require('node-fetch');
+const axios = require('axios');
+
+const fallbackFlirts = [
+    "Are you a magician? Because whenever I look at you, everyone else disappears.",
+    "Do you have a map? Because I just keep getting lost in your eyes.",
+    "If you were a vegetable, you'd be a cute-cumber.",
+    "Is your name Google? Because you have everything I’ve been searching for.",
+    "Do you believe in love at first sight, or should I walk by again?",
+    "Are you a campfire? Because you're hot and I want s'more.",
+    "If beauty were time, you’d definitely be an eternity.",
+    "I must be a snowflake, because I've fallen for you."
+];
 
 async function flirtCommand(sock, chatId, message) {
-    try {
-        const shizokeys = 'shizo';
-        const res = await fetch(`https://shizoapi.onrender.com/api/texts/flirt?apikey=${shizokeys}`);
-        
-        if (!res.ok) {
-            throw await res.text();
-        }
-        
-        const json = await res.json();
-        const flirtMessage = json.result;
+    let flirtText = '';
 
-        // Send the flirt message
-        await sock.sendMessage(chatId, { text: flirtMessage }, { quoted: message });
-    } catch (error) {
-        console.error('Error in flirt command:', error);
-        await sock.sendMessage(chatId, { text: '❌ Failed to get flirt message. Please try again later!' }, { quoted: message });
+    try {
+        const res = await axios.get('https://shizoapi.onrender.com/api/texts/flirt?apikey=shizo', {
+            timeout: 3000,
+            headers: { 'Accept-Encoding': 'identity', 'User-Agent': 'Mozilla/5.0' }
+        });
+        if (res.data && res.data.result && typeof res.data.result === 'string') {
+            flirtText = res.data.result.trim();
+        }
+    } catch (_) {}
+
+    if (!flirtText) {
+        flirtText = fallbackFlirts[Math.floor(Math.random() * fallbackFlirts.length)];
     }
+
+    const reply = `╭─ *💘 𝗭𝗢𝗫𝗘𝗥 𝗙𝗟𝗜𝗥𝗧*
+┃
+┃  ◈ *𝗠𝗘𝗦𝗦𝗔𝗚𝗘*
+┃  ◆ *"${flirtText}"*
+┃
+╰───────────────`;
+
+    await sock.sendMessage(chatId, { text: reply }, { quoted: message });
 }
 
-module.exports = { flirtCommand }; 
+module.exports = { flirtCommand };

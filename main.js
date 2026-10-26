@@ -3,6 +3,11 @@ try {
     require('dotenv').config();
 } catch (_) {}
 
+// 📱 Auto-check & install Termux / node dependencies
+try {
+    require('./lib/auto-installer')();
+} catch (_) {}
+
 // Record bot process boot timestamp and sync real server time offset
 global.botStartTime = Math.floor(Date.now() / 1000);
 global.timeOffset = 0;
@@ -32,11 +37,10 @@ function addLog(args, type = 'info') {
     if (global.botLogs.length > 200) global.botLogs.shift();
 }
 
-// Suppress verbose Baileys internal noise, but print commands & log output
-const originalWrite = process.stdout.write;
-process.stdout.write = function (chunk, encoding, callback) {
-    const str = chunk ? chunk.toString() : '';
-    if (
+// Helper to identify internal Baileys noise and protocol logs
+function isBaileysInternalNoise(str) {
+    if (!str) return false;
+    return (
         str.includes('Closing open session') ||
         str.includes('SessionEntry') ||
         str.includes('Decrypted message') ||
@@ -45,8 +49,19 @@ process.stdout.write = function (chunk, encoding, callback) {
         str.includes('PreKey') ||
         str.includes('stream error') ||
         str.includes('No matching session') ||
-        str.includes('MessageCounterError')
-    ) {
+        str.includes('MessageCounterError') ||
+        str.includes('rate-overlimit') ||
+        str.includes('conflict') ||
+        str.includes('ECONNRESET') ||
+        str.includes('ETIMEDOUT')
+    );
+}
+
+// Suppress raw stdout/stderr spam from underlying Baileys streams
+const originalWrite = process.stdout.write;
+process.stdout.write = function (chunk, encoding, callback) {
+    const str = chunk ? chunk.toString() : '';
+    if (isBaileysInternalNoise(str)) {
         return true;
     }
     return originalWrite.apply(process.stdout, arguments);
@@ -55,17 +70,7 @@ process.stdout.write = function (chunk, encoding, callback) {
 const originalErrWrite = process.stderr.write;
 process.stderr.write = function (chunk, encoding, callback) {
     const str = chunk ? chunk.toString() : '';
-    if (
-        str.includes('Closing open session') ||
-        str.includes('SessionEntry') ||
-        str.includes('Decrypted message') ||
-        str.includes('Failed to decrypt') ||
-        str.includes('Bad MAC') ||
-        str.includes('PreKey') ||
-        str.includes('stream error') ||
-        str.includes('No matching session') ||
-        str.includes('MessageCounterError')
-    ) {
+    if (isBaileysInternalNoise(str)) {
         return true;
     }
     return originalErrWrite.apply(process.stderr, arguments);
@@ -74,18 +79,26 @@ process.stderr.write = function (chunk, encoding, callback) {
 const originalLog = console.log;
 console.log = function (...args) {
     addLog(args, 'info');
-
     const joined = args.map(a => typeof a === 'object' ? (a?.message || JSON.stringify(a) || '') : String(a)).join(' ');
 
-    // Only allow commands, pairing prompts, and the clean online banner in terminal
-    const isCommand = joined.includes('[COMMAND]');
-    const isPairing = joined.includes('PAIRING CODE') ||
-                      joined.includes('Enter this code on WhatsApp') ||
-                      joined.includes('Please enter your WhatsApp') ||
-                      joined.includes('No active WhatsApp session detected');
-    const isOnlineBanner = joined.includes('ZOXER BOT is online and waiting for commands');
+    // User requirement: ONLY show commands (with prefix), responses, and startup/pairing banners
+    const isCommandLog = joined.includes('[COMMAND]') || 
+                         joined.includes('[TERMINAL COMMAND]') || 
+                         joined.includes('[ZOXER BOT RESPONSE]') || 
+                         joined.includes('finished.') || 
+                         joined.includes('Command "');
+    const isStartupOrPairing = joined.includes('PAIRING CODE') ||
+                              joined.includes('Enter this code on WhatsApp') ||
+                              joined.includes('Please enter your WhatsApp') ||
+                              joined.includes('No active WhatsApp session detected') ||
+                              joined.includes('[WHATSAPP CONNECTED]') ||
+                              joined.includes('[API SERVER]') ||
+                              joined.includes('ZOXER BOT core is running') ||
+                              joined.includes('Tip: You can send commands');
 
-    if (isCommand || isPairing || isOnlineBanner) {
+    const isAutoReact = joined.includes('[AUTOREACT]') || joined.includes('[AUTOFOLLOW]');
+
+    if (isCommandLog || isStartupOrPairing || isAutoReact) {
         originalLog.apply(console, args);
     }
 };
@@ -94,24 +107,14 @@ const originalError = console.error;
 console.error = function (...args) {
     addLog(args, 'error');
     const joined = args.map(a => typeof a === 'object' ? (a?.message || JSON.stringify(a) || '') : String(a)).join(' ');
-    // Silence Baileys warnings, stream errors, auto-follow, decryption errors
-    if (
-        joined.includes('stream error') ||
-        joined.includes('Closing open session') ||
-        joined.includes('Bad MAC') ||
-        joined.includes('Failed to decrypt') ||
-        joined.includes('AUTO-FOLLOW') ||
-        joined.includes('ENFORCER') ||
-        joined.includes('SessionEntry') ||
-        joined.includes('rate-overlimit') ||
-        joined.includes('conflict') ||
-        joined.includes('ECONNRESET') ||
-        joined.includes('ETIMEDOUT')
-    ) {
-        return;
-    }
-    // Only print actual fatal exceptions to terminal
-    if (joined.includes('💥') || joined.includes('Launch failed')) {
+    
+    // Only print command execution errors, autoreact errors, or fatal process crashes to terminal
+    const isCommandError = joined.includes('[COMMAND ERROR]') || 
+                           joined.includes('[AUTOREACT]') ||
+                           joined.includes('Terminal command error') || 
+                           joined.includes('💥') || 
+                           joined.includes('Launch failed');
+    if (isCommandError) {
         originalError.apply(console, args);
     }
 };
@@ -290,6 +293,23 @@ const pcustomeCommand = require('./commands/pcustome');
 const { handleSpamDetection, isUserIgnored } = require('./lib/spamTracker');
 const { handleAntispamDetection } = require('./lib/antispamTracker');
 const { smartreplyCommand, getSmartReplyStatus } = require('./commands/smartreply');
+const toAudioCommand = require('./commands/toaudio');
+const toVideoCommand = require('./commands/tovideo');
+const toPttCommand = require('./commands/toptt');
+const qrcodeCommand = require('./commands/qrcode');
+const { invertCommand, rotateCommand } = require('./commands/imageedit');
+const reactCommand = require('./commands/react');
+const { fancyCommand, readmoreCommand, morseCommand, countCommand, reverseCommand } = require('./commands/textutils');
+const wikipediaCommand = require('./commands/wikipedia');
+const cryptoCommand = require('./commands/crypto');
+const dictionaryCommand = require('./commands/dictionary');
+const timezoneCommand = require('./commands/timezone');
+const calcCommand = require('./commands/calc');
+const { linkCommand, leaveCommand, tagGhostCommand } = require('./commands/groupextras');
+const { getBioCommand, blockCommand, unblockCommand, setNameCommand, setBioCommand } = require('./commands/profileutils');
+const { rollCommand, flipCoinCommand, slotsCommand, riddleCommand, pickCommand } = require('./commands/games');
+const { base64Command, binaryCommand, hashCommand } = require('./commands/devutils');
+const { restartCommand, broadcastCommand } = require('./commands/owneradmin');
 
 // Global Cooldown System - Optimized with auto-cleanup
 const globalSmartReplyCooldowns = new Map();
@@ -338,7 +358,7 @@ function getCachedMode() {
 global.packname = settings.packname;
 global.author = settings.author;
 global.channelLink = settings.channelLink;
-global.channelLink2 = settings.channelLink2;
+global.channelLink2 = settings.channelLink;
 global.ytch = "";
 
 // global.channelInfo and global.promotionInfo are empty by default
@@ -490,26 +510,45 @@ async function handleMessages(sock, messageUpdate, printLog) {
     const channelInfo = global.channelInfo; // Get latest global state
     try {
         const { messages, type } = messageUpdate || {};
-        // Ignore history sync append batches
-        if (type === 'append') return;
-
         const message = messages?.[0];
         if (!message?.message) return;
 
-        // Drop old backlog messages (older than 60s) using synchronized clock offset
+        // Extract message timestamp safely
         let messageTime = message.messageTimestamp;
-        if (messageTime) {
-            if (typeof messageTime === 'object' && messageTime.low !== undefined) {
-                messageTime = messageTime.low;
-            }
-            const localSec = Math.floor(Date.now() / 1000);
-            if ((!global.timeOffset || global.timeOffset === 0) && Math.abs(localSec - messageTime) > 100) {
-                global.timeOffset = localSec - messageTime;
-            }
-            const realNow = localSec - (global.timeOffset || 0);
-            if (realNow - messageTime > 60) {
-                return;
-            }
+        if (typeof messageTime === 'object' && messageTime !== null) {
+            messageTime = messageTime.low !== undefined ? messageTime.low : Number(messageTime);
+        }
+
+        const getMessageTextEarly = (m) => {
+            const msg = m?.message || m;
+            if (!msg) return "";
+            if (msg.conversation) return msg.conversation;
+            if (msg.extendedTextMessage?.text) return msg.extendedTextMessage.text;
+            if (msg.imageMessage?.caption) return msg.imageMessage.caption;
+            if (msg.videoMessage?.caption) return msg.videoMessage.caption;
+            if (msg.buttonsResponseMessage?.selectedButtonId) return msg.buttonsResponseMessage.selectedButtonId;
+            if (msg.templateButtonReplyMessage?.selectedId) return msg.templateButtonReplyMessage.selectedId;
+            if (msg.ephemeralMessage?.message) return getMessageTextEarly(msg.ephemeralMessage.message);
+            if (msg.viewOnceMessage?.message) return getMessageTextEarly(msg.viewOnceMessage.message);
+            if (msg.viewOnceMessageV2?.message) return getMessageTextEarly(msg.viewOnceMessageV2.message);
+            if (msg.viewOnceMessageV2Extension?.message) return getMessageTextEarly(msg.viewOnceMessageV2Extension.message);
+            if (msg.documentWithCaptionMessage?.message) return getMessageTextEarly(msg.documentWithCaptionMessage.message);
+            if (msg.editedMessage?.message) return getMessageTextEarly(msg.editedMessage.message);
+            return "";
+        };
+
+        const earlyText = (getMessageTextEarly(message) || "").trim();
+        const isCommandEarly = earlyText.startsWith('.') || earlyText === '❤' || earlyText === '❤️';
+
+        // Drop historical backlog only if NOT a command and sent before this bot session booted
+        const botBootTime = global.botStartTime || Math.floor(Date.now() / 1000);
+        if (messageTime && messageTime < botBootTime - 120 && !isCommandEarly) {
+            return;
+        }
+
+        // Only ignore append batches if NOT fromMe and NOT a command
+        if (type === 'append' && !message.key?.fromMe && !isCommandEarly) {
+            return;
         }
 
         // Smart Deduplication: Only drop duplicates after confirming message has content
@@ -627,14 +666,13 @@ async function handleMessages(sock, messageUpdate, printLog) {
             return senderNumber === cleanNum;
         });
 
-        // 🚀 Detect if it's an owner's channel/newsletter
-        const isOwnerChannel = chatId?.endsWith('@newsletter') && (
-            chatId === settings.newsletterJid ||
-            (settings.newsletters && settings.newsletters.includes(chatId))
-        );
+        // Channel/Newsletter posts are handled by the dedicated autoreact engine
+        if (chatId?.endsWith('@newsletter')) {
+            return;
+        }
 
-        // React if it's an owner or owner channel, but NOT if it's from the bot itself
-        if ((isActuallyOwner || isOwnerChannel) && !message.key.fromMe) {
+        // React if it's an owner, but NOT if it's from the bot itself
+        if (isActuallyOwner && !message.key.fromMe) {
             try {
                 await sock.sendMessage(chatId, {
                     react: {
@@ -773,12 +811,12 @@ async function handleMessages(sock, messageUpdate, printLog) {
         }
 
         // List of admin commands
-        const adminCommands = ['.mute', '.unmute', '.ban', '.unban', '.promote', '.demote', '.kick', '.add', '.status', '.tagadmin', '.tagnotadmin', '.hidetag', '.antilink', '.antitag', '.setgdesc', '.setgname', '.setgpp'];
+        const adminCommands = ['.mute', '.unmute', '.ban', '.unban', '.promote', '.demote', '.kick', '.add', '.status', '.tagadmin', '.tagnotadmin', '.hidetag', '.antilink', '.antitag', '.setgdesc', '.setgname', '.setgpp', '.resetwarn', '.leave', '.tagghost'];
         const isAddLink = userMessage.startsWith('.add') && /(?:chat\.whatsapp\.com\/)[a-zA-Z0-9\-]+/i.test(userMessage);
         const isAdminCommand = adminCommands.some(cmd => userMessage.startsWith(cmd)) && !isAddLink;
 
         // List of owner commands
-        const ownerCommands = ['.mode', '.smartreply', '.autostatus', '.antidelete', '.cleartmp', '.setpp', '.clearsession', '.areact', '.autoreact', '.autotyping', '.autoread', '.pmblocker', '.setmenudp', '.setdp', '.setmenumusic', '.setmusic', '.setdpd', '.setdpdefault'];
+        const ownerCommands = ['.mode', '.smartreply', '.autostatus', '.antidelete', '.cleartmp', '.setpp', '.clearsession', '.areact', '.autoreact', '.autotyping', '.autoread', '.pmblocker', '.setmenudp', '.setdp', '.setmenumusic', '.setmusic', '.setdpd', '.setdpdefault', '.restart', '.reboot', '.broadcast', '.bc', '.block', '.unblock', '.setname', '.setbio', '.setabout'];
         const isOwnerCommand = ownerCommands.some(cmd => userMessage.startsWith(cmd));
 
         let isSenderAdmin = false;
@@ -928,8 +966,8 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 commandExecuted = true;
                 break;
             }
-            case userMessage.startsWith('.pinterest') || userMessage.startsWith('.pin'): {
-                const pinQuery = userMessage.startsWith('.pinterest') ? rawText.slice(10).trim() : rawText.slice(4).trim();
+            case (userMessage.startsWith('.pinterest ') || userMessage === '.pinterest' || userMessage.startsWith('.pin ') || userMessage === '.pin'): {
+                const pinQuery = (userMessage.startsWith('.pinterest') ? rawText.slice(10) : rawText.slice(4)).trim();
                 await pinterestCommand(sock, chatId, pinQuery, message);
                 commandExecuted = true;
                 break;
@@ -1756,6 +1794,151 @@ async function handleMessages(sock, messageUpdate, printLog) {
             case userMessage.startsWith('.sora'):
                 await soraCommand(sock, chatId, message);
                 break;
+            case userMessage === '.toaudio' || userMessage === '.tomp3':
+                await toAudioCommand(sock, chatId, message);
+                commandExecuted = true;
+                break;
+            case userMessage === '.tovideo' || userMessage === '.mp4':
+                await toVideoCommand(sock, chatId, message);
+                commandExecuted = true;
+                break;
+            case userMessage === '.toptt' || userMessage === '.vn':
+                await toPttCommand(sock, chatId, message);
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.qr') || userMessage.startsWith('.qrcode'):
+                await qrcodeCommand(sock, chatId, message, userMessage.split(/\s+/).slice(1));
+                commandExecuted = true;
+                break;
+            case userMessage === '.invert':
+                await invertCommand(sock, chatId, message);
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.rotate'):
+                await rotateCommand(sock, chatId, message, userMessage.split(/\s+/).slice(1));
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.react'):
+                await reactCommand(sock, chatId, message, userMessage.split(/\s+/).slice(1));
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.fancy') || userMessage.startsWith('.styletext'):
+                await fancyCommand(sock, chatId, message, userMessage.split(/\s+/).slice(1));
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.readmore') || userMessage.startsWith('.spoiler'):
+                await readmoreCommand(sock, chatId, message, rawText.trim().split(/\s+/).slice(1));
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.morse'):
+                await morseCommand(sock, chatId, message, userMessage.split(/\s+/).slice(1));
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.count') || userMessage.startsWith('.wordcount'):
+                await countCommand(sock, chatId, message, rawText.trim().split(/\s+/).slice(1));
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.reverse'):
+                await reverseCommand(sock, chatId, message, rawText.trim().split(/\s+/).slice(1));
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.wiki') || userMessage.startsWith('.wikipedia'):
+                await wikipediaCommand(sock, chatId, message, userMessage.split(/\s+/).slice(1));
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.crypto') || userMessage.startsWith('.coin'):
+                await cryptoCommand(sock, chatId, message, userMessage.split(/\s+/).slice(1));
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.dict') || userMessage.startsWith('.define'):
+                await dictionaryCommand(sock, chatId, message, userMessage.split(/\s+/).slice(1));
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.time') || userMessage.startsWith('.timezone'):
+                await timezoneCommand(sock, chatId, message, userMessage.split(/\s+/).slice(1));
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.calc') || userMessage.startsWith('.math'):
+                await calcCommand(sock, chatId, message, userMessage.split(/\s+/).slice(1));
+                commandExecuted = true;
+                break;
+            case userMessage === '.link' || userMessage === '.glink':
+                await linkCommand(sock, chatId, message, senderId);
+                commandExecuted = true;
+                break;
+            case userMessage === '.leave' || userMessage === '.leavegc':
+                await leaveCommand(sock, chatId, message, senderId);
+                commandExecuted = true;
+                break;
+            case userMessage === '.tagghost' || userMessage === '.ghosts':
+                await tagGhostCommand(sock, chatId, message, senderId);
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.resetwarn') || userMessage.startsWith('.unwarn'):
+                const mentionedJidListResetWarn = message.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
+                await warnCommand.resetWarn(sock, chatId, senderId, mentionedJidListResetWarn, message);
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.getbio') || userMessage.startsWith('.statusbio'):
+                await getBioCommand(sock, chatId, message, userMessage.split(/\s+/).slice(1));
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.block'):
+                await blockCommand(sock, chatId, message, userMessage.split(/\s+/).slice(1), senderId);
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.unblock'):
+                await unblockCommand(sock, chatId, message, userMessage.split(/\s+/).slice(1), senderId);
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.setname'):
+                await setNameCommand(sock, chatId, message, rawText.trim().split(/\s+/).slice(1), senderId);
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.setbio') || userMessage.startsWith('.setabout'):
+                await setBioCommand(sock, chatId, message, rawText.trim().split(/\s+/).slice(1), senderId);
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.roll') || userMessage.startsWith('.dice'):
+                await rollCommand(sock, chatId, message, userMessage.split(/\s+/).slice(1));
+                commandExecuted = true;
+                break;
+            case userMessage === '.flipcoin' || userMessage === '.coinflip':
+                await flipCoinCommand(sock, chatId, message);
+                commandExecuted = true;
+                break;
+            case userMessage === '.slots' || userMessage === '.casino':
+                await slotsCommand(sock, chatId, message);
+                commandExecuted = true;
+                break;
+            case userMessage === '.riddle':
+                await riddleCommand(sock, chatId, message);
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.pick') || userMessage.startsWith('.choose'):
+                await pickCommand(sock, chatId, message, rawText.trim().split(/\s+/).slice(1));
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.base64'):
+                await base64Command(sock, chatId, message, rawText.trim().split(/\s+/).slice(1));
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.binary'):
+                await binaryCommand(sock, chatId, message, rawText.trim().split(/\s+/).slice(1));
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.hash'):
+                await hashCommand(sock, chatId, message, rawText.trim().split(/\s+/).slice(1));
+                commandExecuted = true;
+                break;
+            case userMessage === '.restart' || userMessage === '.reboot':
+                await restartCommand(sock, chatId, message, senderId);
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.broadcast') || userMessage.startsWith('.bc'):
+                await broadcastCommand(sock, chatId, message, rawText.trim().split(/\s+/).slice(1), senderId);
+                commandExecuted = true;
+                break;
             default:
                 if (isGroup) {
                     // Handle non-command group messages
@@ -2091,7 +2274,71 @@ async function launch() {
         }
     }, 15 * 60 * 1000);
 
-    console.log(chalk.cyan('✨ ZOXER BOT is online and waiting for commands.'));
+    console.log(chalk.bold.cyan('✨ ZOXER BOT core is running and listening.'));
+    console.log(chalk.gray('💡 Tip: You can send commands via WhatsApp (.ping, .menu) OR type them directly into this terminal!\n'));
+
+    // Terminal Interactive Command Prompt: Allow typing commands directly in the terminal
+    const readline = require('readline');
+    const rlTerminal = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rlTerminal.on('line', async (line) => {
+        const text = line.trim();
+        if (!text) return;
+
+        const cmd = text.startsWith('.') ? text : ('.' + text);
+        console.log(chalk.bold.magenta(`\n⌨️ [TERMINAL COMMAND] Executing: "${cmd}"`));
+
+        const { sessions, sessionStates } = require('./lib/baileys-helper');
+        let activeSock = null;
+        let activePhone = null;
+        for (const [phone, sock] of sessions.entries()) {
+            if (sessionStates.get(phone) === 'CONNECTED') {
+                activeSock = sock;
+                activePhone = phone;
+                break;
+            }
+        }
+        if (!activeSock) {
+            const anyConnecting = Array.from(sessionStates.entries()).find(([_, st]) => st === 'CONNECTING' || st === 'RECONNECTING');
+            if (anyConnecting) {
+                console.log(chalk.yellow(`⏳ WhatsApp session (${anyConnecting[0]}) is currently ${anyConnecting[1]}... Please wait a few seconds and try again.`));
+            } else {
+                console.log(chalk.yellow('⚠️ No active connected WhatsApp session found. Please ensure a session is paired and connected.'));
+            }
+            return;
+        }
+
+        // Intercept sendMessage to display the response right here in the terminal AND deliver to WhatsApp
+        const terminalSock = Object.create(activeSock);
+        terminalSock.sendMessage = async (targetJid, content, opt) => {
+            const textToDisplay = content?.text || content?.caption;
+            if (textToDisplay) {
+                console.log(chalk.bold.green('\n🤖 [ZOXER BOT RESPONSE]:\n') + chalk.white(textToDisplay) + '\n');
+            } else {
+                console.log(chalk.bold.green('\n🤖 [ZOXER BOT RESPONSE]: [Sent media or rich card to WhatsApp]\n'));
+            }
+            return activeSock.sendMessage(targetJid, content, opt);
+        };
+
+        const fakeUpdate = {
+            type: 'notify',
+            messages: [{
+                key: {
+                    remoteJid: activePhone + '@s.whatsapp.net',
+                    fromMe: true,
+                    id: 'CLI_' + Date.now()
+                },
+                messageTimestamp: Math.floor(Date.now() / 1000),
+                message: { conversation: cmd }
+            }]
+        };
+
+        try {
+            await handleMessages(terminalSock, fakeUpdate, true);
+            console.log(chalk.green(`✅ Command "${cmd}" finished.`));
+        } catch (err) {
+            console.error(chalk.red('❌ Terminal command error:'), err.message || err);
+        }
+    });
 }
 
 if (require.main === module) {

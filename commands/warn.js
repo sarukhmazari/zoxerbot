@@ -1,4 +1,4 @@
-﻿const fs = require('fs');
+const fs = require('fs');
 const path = require('path');
 const isAdmin = require('../lib/isAdmin');
 
@@ -94,11 +94,18 @@ async function warnCommand(sock, chatId, senderId, mentionedJids, message) {
             warnings[chatId][userToWarn]++;
             fs.writeFileSync(warningsPath, JSON.stringify(warnings, null, 2));
 
-            const warningMessage = `*『 WARNING ALERT 』*\n\n` +
-                `👤 *Warned User:* @${userToWarn.split('@')[0]}\n` +
-                `⚠️ *Warning Count:* ${warnings[chatId][userToWarn]}/3\n` +
-                `👑 *Warned By:* @${senderId.split('@')[0]}\n\n` +
-                `📅 *Date:* ${new Date().toLocaleString()}`;
+            const warningMessage = `╭─ *⚠️ 𝗪𝗔𝗥𝗡𝗜𝗡𝗚 𝗔𝗟𝗘𝗥𝗧*
+┃
+┃  ◈ *𝗪𝗔𝗥𝗡𝗘𝗗 𝗨𝗦𝗘𝗥*
+┃  ◆ *@${userToWarn.split('@')[0]}*
+┃  ◈ *𝗦𝗧𝗥𝗜𝗞𝗘𝗦*
+┃  ◆ *${warnings[chatId][userToWarn]} / 3*
+┃  ◈ *𝗪𝗔𝗥𝗡𝗘𝗗 𝗕𝗬*
+┃  ◆ *@${senderId.split('@')[0]}*
+┃  ◈ *𝗧𝗜𝗠𝗘*
+┃  ◆ *${new Date().toLocaleTimeString()}*
+┃
+╰───────────────`;
 
             await sock.sendMessage(chatId, { 
                 text: warningMessage,
@@ -114,8 +121,14 @@ async function warnCommand(sock, chatId, senderId, mentionedJids, message) {
                 delete warnings[chatId][userToWarn];
                 fs.writeFileSync(warningsPath, JSON.stringify(warnings, null, 2));
                 
-                const kickMessage = `*『 AUTO-KICK 』*\n\n` +
-                    `@${userToWarn.split('@')[0]} has been removed from the group after receiving 3 warnings! ⚠️`;
+                const kickMessage = `╭─ *🚨 𝗔𝗨𝗧𝗢-𝗞𝗜𝗖𝗞*
+┃
+┃  ◈ *𝗨𝗦𝗘𝗥 𝗥𝗘𝗠𝗢𝗩𝗘𝗗*
+┃  ◆ *@${userToWarn.split('@')[0]}*
+┃  ◈ *𝗥𝗘𝗔𝗦𝗢𝗡*
+┃  ◆ *Maximum warning limit reached (3/3 strikes).*
+┃
+╰───────────────`;
 
                 await sock.sendMessage(chatId, { 
                     text: kickMessage,
@@ -151,4 +164,59 @@ async function warnCommand(sock, chatId, senderId, mentionedJids, message) {
     }
 }
 
+async function resetWarnCommand(sock, chatId, senderId, mentionedJids, message) {
+    try {
+        initializeWarningsFile();
+
+        if (!chatId.endsWith('@g.us')) {
+            return await sock.sendMessage(chatId, { text: '❌ This command can only be used in groups.' });
+        }
+
+        const { isSenderAdmin } = await isAdmin(sock, chatId, senderId);
+        if (!isSenderAdmin && !message.key.fromMe) {
+            return await sock.sendMessage(chatId, { text: '❌ Error: Only group admins can reset warnings.' });
+        }
+
+        let target = mentionedJids && mentionedJids.length > 0 ? mentionedJids[0] : null;
+        if (!target) {
+            const quoted = message.message?.extendedTextMessage?.contextInfo?.participant;
+            if (quoted) target = quoted;
+        }
+
+        if (!target) {
+            return await sock.sendMessage(chatId, { text: '⚠️ Please mention or reply to a user to reset their warnings: `.resetwarn @user`' });
+        }
+
+        const warningsData = JSON.parse(fs.readFileSync(warningsPath, 'utf8'));
+        const userClean = target.split('@')[0].split(':')[0];
+
+        if (!warningsData[target] || warningsData[target] === 0) {
+            return await sock.sendMessage(chatId, { text: `ℹ️ @${userClean} currently has 0 warnings.`, mentions: [target] });
+        }
+
+        delete warningsData[target];
+        fs.writeFileSync(warningsPath, JSON.stringify(warningsData, null, 2), 'utf8');
+
+        const resetMsg = `╭─ *✅ 𝗪𝗔𝗥𝗡𝗜𝗡𝗚𝗦 𝗖𝗟𝗘𝗔𝗥𝗘𝗗*
+┃
+┃  ◈ *𝗨𝗦𝗘𝗥*
+┃  ◆ *@${userClean}*
+┃  ◈ *𝗦𝗧𝗔𝗧𝗨𝗦*
+┃  ◆ *All warning strikes reset to 0/3.*
+┃
+╰───────────────`;
+
+        await sock.sendMessage(chatId, {
+            text: resetMsg,
+            mentions: [target]
+        });
+
+    } catch (err) {
+        console.error('Error in resetWarnCommand:', err);
+        await sock.sendMessage(chatId, { text: `❌ Failed to reset warnings: ${err.message}` });
+    }
+}
+
+warnCommand.resetWarn = resetWarnCommand;
 module.exports = warnCommand;
+

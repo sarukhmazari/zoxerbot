@@ -33,10 +33,6 @@ async function handleCommand(sock, m, currentSessionPhone) {
   const command = args.shift().toLowerCase();
 
   switch (command) {
-    case 'ping':
-      await sock.sendMessage(remoteJid, { text: '🏓 *ZOXER BOT is active!*' }, { quoted: m });
-      break;
-
     case 'unpair': {
       if (!isOwner) {
         return await sock.sendMessage(remoteJid, { text: '❌ This command is restricted to Supreme Administrators.' }, { quoted: m });
