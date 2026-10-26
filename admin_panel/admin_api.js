@@ -156,7 +156,7 @@ function startAdminApi() {
       });
 
       // Request pairing code from Baileys engine
-      const result = await requestPairingCodeForPhone(cleanDigits, 22000);
+      const result = await requestPairingCodeForPhone(cleanDigits, 28000);
 
       if (result.alreadyConnected) {
         return res.json({

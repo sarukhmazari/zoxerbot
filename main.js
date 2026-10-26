@@ -2187,38 +2187,42 @@ async function launch() {
 
     if (hasExistingSession) {
         console.log(chalk.yellow(`\n🔄 Initializing primary session for ${primaryPhone}...`));
-        await initSession(primaryPhone, { usePairingCode: true });
+        await initSession(primaryPhone, { usePairingCode: false });
     } else if (dbSessions && dbSessions.length > 0) {
         hasExistingSession = true;
         primaryPhone = dbSessions[0].phone_number.replace(/[^0-9]/g, '');
         console.log(chalk.yellow(`\n🔄 Initializing primary session from database for ${primaryPhone}...`));
-        await initSession(primaryPhone, { usePairingCode: true });
+        await initSession(primaryPhone, { usePairingCode: false });
     } else {
         console.log(chalk.bold.cyan('\n=========================================='));
         console.log(chalk.bold.yellow('📱 No active WhatsApp session detected!'));
         console.log(chalk.bold.cyan('==========================================\n'));
 
-        const defaultNum = settings.ownerNumber ? settings.ownerNumber.replace(/[^0-9]/g, '') : '';
-        const promptText = defaultNum 
-            ? chalk.bold.green(`👉 Please enter your WhatsApp number with country code (e.g. 923xxxxxxxxx) [Default: ${defaultNum}]: `)
-            : chalk.bold.green('👉 Please enter your WhatsApp number with country code (e.g. 923xxxxxxxxx): ');
+        if (!process.stdin.isTTY) {
+            console.log(chalk.cyan('🌐 Web server active. Waiting for pairing via frontend at https://zoxermdfrontend.vercel.app'));
+        } else {
+            const defaultNum = settings.ownerNumber ? settings.ownerNumber.replace(/[^0-9]/g, '') : '';
+            const promptText = defaultNum 
+                ? chalk.bold.green(`👉 Please enter your WhatsApp number with country code (e.g. 923xxxxxxxxx) [Default: ${defaultNum}]: `)
+                : chalk.bold.green('👉 Please enter your WhatsApp number with country code (e.g. 923xxxxxxxxx): ');
 
-        let phone = await question(promptText);
-        phone = phone.trim();
-        if (!phone && defaultNum) {
-            phone = defaultNum;
+            let phone = await question(promptText);
+            phone = phone.trim();
+            if (!phone && defaultNum) {
+                phone = defaultNum;
+            }
+            phone = phone.replace(/[^0-9]/g, '');
+
+            while (!phone || phone.length < 10) {
+                console.log(chalk.red('❌ Invalid phone number. Please enter digits with country code (e.g., 923232391033):'));
+                phone = await question(chalk.bold.green('👉 Phone Number: '));
+                phone = phone.trim().replace(/[^0-9]/g, '');
+            }
+
+            primaryPhone = phone;
+            console.log(chalk.yellow(`\n🔄 Requesting pairing code for ${primaryPhone}...`));
+            await initSession(primaryPhone, { usePairingCode: true, isOwner: true });
         }
-        phone = phone.replace(/[^0-9]/g, '');
-
-        while (!phone || phone.length < 10) {
-            console.log(chalk.red('❌ Invalid phone number. Please enter digits with country code (e.g., 923232391033):'));
-            phone = await question(chalk.bold.green('👉 Phone Number: '));
-            phone = phone.trim().replace(/[^0-9]/g, '');
-        }
-
-        primaryPhone = phone;
-        console.log(chalk.yellow(`\n🔄 Requesting pairing code for ${primaryPhone}...`));
-        await initSession(primaryPhone, { usePairingCode: true, isOwner: true });
     }
 
     // Initialize/Resume other existing sessions
