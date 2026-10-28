@@ -31,7 +31,13 @@ async function toAudioCommand(sock, chatId, message) {
             };
         }
 
-        const msgObj = targetMessage.message;
+        let msgObj = targetMessage.message;
+        if (msgObj?.viewOnceMessage?.message) msgObj = msgObj.viewOnceMessage.message;
+        if (msgObj?.viewOnceMessageV2?.message) msgObj = msgObj.viewOnceMessageV2.message;
+        if (msgObj?.viewOnceMessageV2Extension?.message) msgObj = msgObj.viewOnceMessageV2Extension.message;
+        if (msgObj?.ephemeralMessage?.message) msgObj = msgObj.ephemeralMessage.message;
+        if (msgObj?.documentWithCaptionMessage?.message) msgObj = msgObj.documentWithCaptionMessage.message;
+
         const mediaMsg = msgObj?.videoMessage || msgObj?.audioMessage || msgObj?.documentMessage;
 
         if (!mediaMsg) {
@@ -39,6 +45,11 @@ async function toAudioCommand(sock, chatId, message) {
                 text: '⚠️ Please reply to a *video* or *audio* message with *.toaudio* or *.tomp3*.'
             }, { quoted: message });
         }
+
+        targetMessage = {
+            ...targetMessage,
+            message: msgObj
+        };
 
         await sock.sendMessage(chatId, { react: { text: '⏳', key: message.key } });
 
@@ -78,13 +89,18 @@ async function toAudioCommand(sock, chatId, message) {
             }, { quoted: message });
         }
 
-        const cmd = `ffmpeg -y -i "${tempInput}" -vn -acodec libmp3lame -b:a 128k "${tempOutput}"`;
+        const cmd = `ffmpeg -y -i "${tempInput}" -vn -c:a libmp3lame -b:a 128k -ar 44100 -ac 2 "${tempOutput}"`;
         await new Promise((resolve, reject) => {
             exec(cmd, (err, stdout, stderr) => {
                 if (err) {
-                    if ((err.message && err.message.includes('Output file does not contain any stream')) ||
-                        (stderr && stderr.includes('Output file does not contain any stream'))) {
+                    const errStr = `${err.message || ''} ${stderr || ''}`;
+                    if (errStr.includes('Output file does not contain any stream') ||
+                        errStr.includes('does not contain any stream') ||
+                        errStr.includes('matches no streams')) {
                         return reject(new Error('The replied video has no audio track (it is silent or a GIF).'));
+                    }
+                    if (errStr.includes('not found') || errStr.includes('ENOENT')) {
+                        return reject(new Error('FFmpeg is not installed on the server.'));
                     }
                     return reject(err);
                 }
@@ -104,9 +120,12 @@ async function toAudioCommand(sock, chatId, message) {
 
     } catch (err) {
         console.error('Error in toAudioCommand:', err);
-        const userMsg = err.message.includes('no audio track') 
+        const errMsg = err?.message || String(err);
+        const userMsg = (errMsg.includes('no audio track') || errMsg.includes('silent'))
             ? '⚠️ The replied video has *no audio track* (it is silent or a GIF). Please reply to a video with sound.'
-            : `❌ Failed to convert media to audio: ${err.message}`;
+            : (errMsg.includes('FFmpeg is not installed') 
+                ? '⚠️ FFmpeg is not installed on the server. Please contact bot host.'
+                : `❌ Failed to convert media to audio: ${errMsg}`);
 
         await sock.sendMessage(chatId, { text: userMsg }, { quoted: message });
     } finally {

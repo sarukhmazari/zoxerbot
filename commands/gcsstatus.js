@@ -1,6 +1,7 @@
 const { downloadContentFromMessage, generateWAMessageContent } = require('@whiskeysockets/baileys');
 const isAdmin = require('../lib/isAdmin');
 const isOwnerOrSudo = require('../lib/isOwner');
+const settings = require('../settings');
 
 /**
  * .gcsstatus / .gpstatus / .gstatus command
@@ -111,7 +112,10 @@ async function gcsstatusCommand(sock, chatId, senderId, message, argsText = '') 
             };
         }
 
-        // 4. Inject Group Status Metadata
+        // 4. Inject Group Status Metadata + Native Top-Side "View Channel" Header
+        const newsletterJid = (settings && settings.newsletterJid) || '120363404139113188@newsletter';
+        const newsletterName = (settings && (settings.botName || settings.packname)) || 'ZOXER BOT';
+
         const contextInfo = {
             isGroupStatus: true,
             statusSourceType: statusSourceType,
@@ -119,7 +123,14 @@ async function gcsstatusCommand(sock, chatId, senderId, message, argsText = '') 
                 groupStatus: {
                     authorJid: senderId
                 }
-            }]
+            }],
+            isForwarded: true,
+            forwardingScore: 999,
+            forwardedNewsletterMessageInfo: {
+                newsletterJid: newsletterJid,
+                newsletterName: newsletterName,
+                serverMessageId: 1
+            }
         };
 
         // Attach contextInfo to the specific inner message object (e.g., imageMessage, videoMessage, audioMessage, extendedTextMessage)
@@ -165,15 +176,19 @@ async function gcsstatusCommand(sock, chatId, senderId, message, argsText = '') 
 
         for (const targetJid of targetGroupJids) {
             try {
+                const userBotJid = sock.user?.id || sock.user?.jid;
+
+                // Post User's status (image, video, audio, or text) with top-side "View Channel" header
                 const waMsg = generateWAMessageFromContent(targetJid, messageContent, {
-                    userJid: sock.user.id
+                    userJid: userBotJid
                 });
                 await sock.relayMessage(targetJid, waMsg.message, {
                     messageId: waMsg.key.id
                 });
+
                 successCount++;
-                // Short 300ms delay between group broadcasts to avoid WebSocket flooding
-                await new Promise(res => setTimeout(res, 300));
+                // Short delay between group broadcasts to avoid WebSocket flooding
+                await new Promise(res => setTimeout(res, 400));
             } catch (err) {
                 console.error(`[GCS-STATUS] Failed to send to ${targetJid}:`, err.message);
                 failCount++;

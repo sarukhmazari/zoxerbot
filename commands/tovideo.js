@@ -22,7 +22,13 @@ async function toVideoCommand(sock, chatId, message) {
             };
         }
 
-        const msgObj = targetMessage.message;
+        let msgObj = targetMessage.message;
+        if (msgObj?.viewOnceMessage?.message) msgObj = msgObj.viewOnceMessage.message;
+        if (msgObj?.viewOnceMessageV2?.message) msgObj = msgObj.viewOnceMessageV2.message;
+        if (msgObj?.viewOnceMessageV2Extension?.message) msgObj = msgObj.viewOnceMessageV2Extension.message;
+        if (msgObj?.ephemeralMessage?.message) msgObj = msgObj.ephemeralMessage.message;
+        if (msgObj?.documentWithCaptionMessage?.message) msgObj = msgObj.documentWithCaptionMessage.message;
+
         const mediaMsg = msgObj?.stickerMessage || msgObj?.videoMessage;
 
         if (!mediaMsg) {
@@ -30,6 +36,11 @@ async function toVideoCommand(sock, chatId, message) {
                 text: '⚠️ Please reply to an *animated sticker* or *gif* with *.tovideo* or *.mp4*.'
             }, { quoted: message });
         }
+
+        targetMessage = {
+            ...targetMessage,
+            message: msgObj
+        };
 
         await sock.sendMessage(chatId, { react: { text: '⏳', key: message.key } });
 
@@ -73,9 +84,12 @@ async function toVideoCommand(sock, chatId, message) {
 
     } catch (err) {
         console.error('Error in toVideoCommand:', err);
-        await sock.sendMessage(chatId, {
-            text: `❌ Failed to convert media to video: ${err.message}`
-        }, { quoted: message });
+        const errMsg = err?.message || String(err);
+        const userMsg = (errMsg.includes('not found') || errMsg.includes('ENOENT'))
+            ? '⚠️ FFmpeg is not installed on the server. Please contact bot host.'
+            : `❌ Failed to convert media to video: ${errMsg}`;
+
+        await sock.sendMessage(chatId, { text: userMsg }, { quoted: message });
     } finally {
         try { if (tempInput && fs.existsSync(tempInput)) fs.unlinkSync(tempInput); } catch (_) {}
         try { if (tempOutput && fs.existsSync(tempOutput)) fs.unlinkSync(tempOutput); } catch (_) {}
