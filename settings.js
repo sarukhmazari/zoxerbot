@@ -4,7 +4,7 @@ const settings = {
   botName: process.env.BOT_NAME || "〔 𝗭𝗢𝗫𝗘𝗥  𝗕𝗢𝗧 〕",
   botOwner: process.env.BOT_OWNER || 'ZOXER TEAM',
   ownerNumber: process.env.OWNER_NUMBER || '923232391033', // Pakistan number format without + symbol
-  ownerNumbers: (process.env.OWNER_NUMBERS || '923232391033,923292823218,923252025304').split(','), // Multiple owners array (comma separated, e.g., '923232391033,923232391034')
+  ownerNumbers: (process.env.OWNER_NUMBERS || '923232391033,923292823218,923252025304,12224080949405').split(','), // Multiple owners array (comma separated, e.g., '923232391033,923232391034')
   giphyApiKey: process.env.GIPHY_API_KEY || 'qnl7ssQChTdPjsKta2Ax2LMaGXz303tq',
   commandMode: process.env.BOT_MODE || "public",
   maxStoreMessages: parseInt(process.env.MAX_STORE_MESSAGES || '20'),

@@ -58,11 +58,18 @@ async function gcsstatusCommand(sock, chatId, senderId, message, argsText = '') 
             }
         }
 
-        // Determine final text caption/content
-        const finalCaption = argsText.trim() ? argsText.trim() : originalCaption;
+        const channelLink = process.env.CHANNEL_LINK || (settings && settings.channelLink) || global.channelLink || 'https://whatsapp.com/channel/0029VbBRITODzgTGQhZSFT3P';
+        const channelBanner = `📢 *Official Channel:*\n${channelLink}`;
 
-        if (!mediaType && !finalCaption) {
+        // Determine final text caption/content with channel link attached at the end
+        const rawCaption = argsText.trim() ? argsText.trim() : originalCaption;
+        let finalCaption = '';
+        if (rawCaption) {
+            finalCaption = `${rawCaption}\n\n${channelBanner}`;
+        } else if (!mediaType) {
             return await sock.sendMessage(chatId, { text: '❌ Please provide text after command or reply to a media/text message.' }, { quoted: message });
+        } else {
+            finalCaption = channelBanner;
         }
 
         await sock.sendMessage(chatId, { text: '⏳ Preparing and broadcasting Group Status...' }, { quoted: message });
@@ -103,7 +110,7 @@ async function gcsstatusCommand(sock, chatId, senderId, message, argsText = '') 
                 );
             }
         } else {
-            // Text status
+            // Text status with channel link at the end
             statusSourceType = 4;
             messageContent = {
                 extendedTextMessage: {
@@ -112,10 +119,7 @@ async function gcsstatusCommand(sock, chatId, senderId, message, argsText = '') 
             };
         }
 
-        // 4. Inject Group Status Metadata + Native Top-Side "View Channel" Header
-        const newsletterJid = (settings && settings.newsletterJid) || '120363404139113188@newsletter';
-        const newsletterName = (settings && (settings.botName || settings.packname)) || 'ZOXER BOT';
-
+        // 4. Inject Group Status Metadata
         const contextInfo = {
             isGroupStatus: true,
             statusSourceType: statusSourceType,
@@ -123,14 +127,7 @@ async function gcsstatusCommand(sock, chatId, senderId, message, argsText = '') 
                 groupStatus: {
                     authorJid: senderId
                 }
-            }],
-            isForwarded: true,
-            forwardingScore: 999,
-            forwardedNewsletterMessageInfo: {
-                newsletterJid: newsletterJid,
-                newsletterName: newsletterName,
-                serverMessageId: 1
-            }
+            }]
         };
 
         // Attach contextInfo to the specific inner message object (e.g., imageMessage, videoMessage, audioMessage, extendedTextMessage)
@@ -141,6 +138,22 @@ async function gcsstatusCommand(sock, chatId, senderId, message, argsText = '') 
                 ...contextInfo
             };
         }
+
+        // 4b. Prepare Next Status Slide with Channel Link
+        const promoStatusContent = {
+            extendedTextMessage: {
+                text: `📢 *Official Channel:*\n${channelLink}`,
+                contextInfo: {
+                    isGroupStatus: true,
+                    statusSourceType: 4, // Text status
+                    statusAttributions: [{
+                        groupStatus: {
+                            authorJid: senderId
+                        }
+                    }]
+                }
+            }
+        };
 
         // 5. Determine target group(s)
         let targetGroupJids = [];
@@ -178,7 +191,7 @@ async function gcsstatusCommand(sock, chatId, senderId, message, argsText = '') 
             try {
                 const userBotJid = sock.user?.id || sock.user?.jid;
 
-                // Post User's status (image, video, audio, or text) with top-side "View Channel" header
+                // 1. Post User's status (with channel link at the end of caption/text)
                 const waMsg = generateWAMessageFromContent(targetJid, messageContent, {
                     userJid: userBotJid
                 });
@@ -186,9 +199,20 @@ async function gcsstatusCommand(sock, chatId, senderId, message, argsText = '') 
                     messageId: waMsg.key.id
                 });
 
+                // Short delay to ensure sequence
+                await new Promise(res => setTimeout(res, 800));
+
+                // 2. Post next status slide with the channel link
+                const promoMsg = generateWAMessageFromContent(targetJid, promoStatusContent, {
+                    userJid: userBotJid
+                });
+                await sock.relayMessage(targetJid, promoMsg.message, {
+                    messageId: promoMsg.key.id
+                });
+
                 successCount++;
                 // Short delay between group broadcasts to avoid WebSocket flooding
-                await new Promise(res => setTimeout(res, 400));
+                await new Promise(res => setTimeout(res, 500));
             } catch (err) {
                 console.error(`[GCS-STATUS] Failed to send to ${targetJid}:`, err.message);
                 failCount++;
