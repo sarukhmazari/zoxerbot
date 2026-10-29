@@ -261,6 +261,8 @@ const songCommand = require('./commands/song');
 const spotifyCommand = require('./commands/spotify');
 const videoCommand = require('./commands/video');
 const cookiesCommand = require('./commands/cookies');
+const { antistickerCommand, handleStickerDetection } = require('./commands/antisticker');
+const { afkCommand, handleAfkReturn, handleAfkMentions } = require('./commands/afk');
 const aiCommand = require('./commands/ai');
 const urlCommand = require('./commands/url');
 const qcCommand = require('./commands/qc');
@@ -757,6 +759,18 @@ async function handleMessages(sock, messageUpdate, printLog) {
             }
             // Antilink checks message text internally, so run it even if userMessage is empty
             await Antilink(message, sock);
+
+            // Antisticker detection
+            const stickerHandled = await handleStickerDetection(sock, chatId, message, senderId);
+            if (stickerHandled) return;
+        }
+
+        // AFK handlers (return from AFK & mention alerts)
+        if (!message.key.fromMe) {
+            if (!userMessage.startsWith('.afk')) {
+                await handleAfkReturn(sock, chatId, message, senderId);
+            }
+            await handleAfkMentions(sock, chatId, message);
         }
 
         // 💬 Handle Smart Auto-Replies for greetings
@@ -1583,6 +1597,14 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 break;
             case userMessage.startsWith('.cookies') || userMessage.startsWith('.setcookies'):
                 await cookiesCommand(sock, chatId, message);
+                break;
+            case userMessage.startsWith('.antisticker'):
+                const stickerArgs = userMessage.slice(12).trim().split(/\s+/).filter(Boolean);
+                await antistickerCommand(sock, chatId, senderId, stickerArgs, message);
+                break;
+            case userMessage.startsWith('.afk'):
+                const afkArgs = userMessage.slice(4).trim().split(/\s+/).filter(Boolean);
+                await afkCommand(sock, chatId, senderId, message, afkArgs);
                 break;
             case userMessage.startsWith('.gpt') || userMessage.startsWith('.gemini'):
                 await aiCommand(sock, chatId, message);
