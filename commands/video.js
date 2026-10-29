@@ -1,15 +1,13 @@
 const { execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-const axios = require('axios');
-const settings = require('../settings');
 
 const tmpDir = path.join(process.cwd(), 'tmp');
 if (!fs.existsSync(tmpDir)) {
     fs.mkdirSync(tmpDir, { recursive: true });
 }
 
-function runYtDlp(args, timeout = 90000) {
+function runYtDlp(args, timeout = 120000) {
     return new Promise((resolve, reject) => {
         execFile('yt-dlp', args, { timeout }, (err, stdout, stderr) => {
             if (err) return reject(new Error(stderr || err.message));
@@ -28,7 +26,7 @@ async function getVideoMeta(queryOrUrl) {
         '--print', '%(title)s|||%(uploader)s|||%(duration_string)s|||%(thumbnail)s|||%(webpage_url)s|||%(id)s',
         target
     ];
-    const out = await runYtDlp(args, 20000);
+    const out = await runYtDlp(args, 25000);
     const [title, uploader, duration, thumbnail, url, id] = out.split('|||').map(s => s?.trim());
     return { title, uploader, duration, thumbnail, url, id };
 }
@@ -57,30 +55,6 @@ async function downloadMp4WithYtDlp(targetUrlOrQuery, outputFileBase) {
     throw new Error('Downloaded MP4 video file not found on disk');
 }
 
-async function fallbackKnightBotVideo(queryOrUrl) {
-    const kbApiKey = process.env.KNIGHTBOT_API_KEY || (settings && settings.knightBotApiKey) || 'knight';
-    const isUrl = /^https?:\/\//i.test(queryOrUrl);
-    const apiUrl = isUrl
-        ? `https://knightbotapi.stream/api/download/ytmp4?apikey=${encodeURIComponent(kbApiKey)}&url=${encodeURIComponent(queryOrUrl)}&format=480p`
-        : `https://knightbotapi.stream/api/ytmp4?apikey=${encodeURIComponent(kbApiKey)}&query=${encodeURIComponent(queryOrUrl)}`;
-
-    const res = await axios.get(apiUrl, { timeout: 15000, validateStatus: () => true });
-    if (res.data?.success && res.data?.result) {
-        const r = res.data.result;
-        const dlUrl = r.download || r.url || r.video || r.dl_url;
-        if (dlUrl && typeof dlUrl === 'string' && dlUrl.startsWith('http')) {
-            return {
-                title: r.title || 'YouTube Video',
-                uploader: r.author || r.uploader || 'YouTube',
-                duration: r.duration || '',
-                thumbnail: r.thumbnail || '',
-                downloadUrl: dlUrl
-            };
-        }
-    }
-    throw new Error('KnightBot video fallback failed');
-}
-
 async function videoCommand(sock, chatId, message, queryText = '') {
     const text = queryText || (
         message.message?.conversation ||
@@ -96,7 +70,7 @@ async function videoCommand(sock, chatId, message, queryText = '') {
 
     await sock.sendMessage(chatId, { react: { text: '🔄', key: message.key } });
     await sock.sendMessage(chatId, {
-        text: `⏳ *Searching & processing video:* "${text}"...`
+        text: `⏳ *Searching & downloading video:* "${text}"...`
     }, { quoted: message });
 
     const fileId = `video_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
@@ -108,18 +82,8 @@ async function videoCommand(sock, chatId, message, queryText = '') {
             meta = await getVideoMeta(text);
         } catch (_) {}
 
-        // 1. Download via yt-dlp
-        try {
-            const target = meta?.url || text;
-            downloadedFilePath = await downloadMp4WithYtDlp(target, fileId);
-        } catch (ytDlpErr) {
-            console.error('[VIDEO] yt-dlp failed, trying fallback...', ytDlpErr.message);
-            const fb = await fallbackKnightBotVideo(text);
-            const dlRes = await axios.get(fb.downloadUrl, { responseType: 'arraybuffer', timeout: 90000 });
-            downloadedFilePath = path.join(tmpDir, `${fileId}.mp4`);
-            fs.writeFileSync(downloadedFilePath, Buffer.from(dlRes.data));
-            if (!meta) meta = fb;
-        }
+        const target = meta?.url || text;
+        downloadedFilePath = await downloadMp4WithYtDlp(target, fileId);
 
         const vidTitle = meta?.title || text;
         const vidUploader = meta?.uploader || 'YouTube';
@@ -153,7 +117,7 @@ async function videoCommand(sock, chatId, message, queryText = '') {
         console.error('[VIDEO] Error in videoCommand:', err);
         await sock.sendMessage(chatId, { react: { text: '❌', key: message.key } });
         await sock.sendMessage(chatId, {
-            text: `❌ *Failed to download video.*\n\n*Error:* ${err.message || 'Video not found or restricted.'}`
+            text: `❌ *Failed to download video.*\n\n*Error:* ${err.message || 'Video could not be downloaded.'}`
         }, { quoted: message });
     } finally {
         if (downloadedFilePath && fs.existsSync(downloadedFilePath)) {
