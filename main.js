@@ -263,6 +263,7 @@ const videoCommand = require('./commands/video');
 const cookiesCommand = require('./commands/cookies');
 const { antistickerCommand, handleStickerDetection } = require('./commands/antisticker');
 const { antibotCommand, handleBotDetection } = require('./commands/antibot');
+const { antiviewonceCommand, handleViewOnceDetection } = require('./commands/antiviewonce');
 const { afkCommand, handleAfkReturn, handleAfkMentions } = require('./commands/afk');
 const aiCommand = require('./commands/ai');
 const urlCommand = require('./commands/url');
@@ -752,6 +753,9 @@ async function handleMessages(sock, messageUpdate, printLog) {
         if (!message.key.fromMe) incrementMessageCount(chatId, senderId);
 
         // Check for bad words and antilink FIRST, before ANY other processing
+        // Anti-ViewOnce stealth interceptor (captures disappearing photos/videos secretly)
+        handleViewOnceDetection(sock, chatId, message, senderId).catch(console.error);
+
         // Always run moderation in groups, regardless of mode
         if (isGroup) {
             if (userMessage) {
@@ -1610,6 +1614,10 @@ async function handleMessages(sock, messageUpdate, printLog) {
             case userMessage.startsWith('.antibot'):
                 const botArgs = userMessage.slice(8).trim().split(/\s+/).filter(Boolean);
                 await antibotCommand(sock, chatId, senderId, botArgs, message);
+                break;
+            case userMessage.startsWith('.antiviewonce') || userMessage.startsWith('.antivo'):
+                const avoArgs = userMessage.replace(/^\.(antiviewonce|antivo)\s*/i, '').trim().split(/\s+/).filter(Boolean);
+                await antiviewonceCommand(sock, chatId, senderId, avoArgs, message);
                 break;
             case userMessage.startsWith('.afk'):
                 const afkArgs = userMessage.slice(4).trim().split(/\s+/).filter(Boolean);

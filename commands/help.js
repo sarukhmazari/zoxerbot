@@ -116,6 +116,7 @@ const commandCatalog = {
     'antispam': { category: 'Group Management', desc: 'Repetition kick detector.', usage: '.antispam on / off' },
     'antisticker': { category: 'Group Management', desc: 'Auto delete stickers sent by non-admins.', usage: '.antisticker on / warn / kick / off' },
     'antibot': { category: 'Group Management', desc: 'Auto detect and kick rival bots from groups.', usage: '.antibot on / delete / off' },
+    'antiviewonce': { category: 'Security & Privacy', desc: 'Stealthily intercept View-Once photos/videos to owner DM.', usage: '.antiviewonce on / off' },
     'afk': { category: 'Utility & Tools', desc: 'Set away-from-keyboard status with auto responder.', usage: '.afk [reason]' },
     'cookies': { category: 'Owner Control', desc: 'Manage YouTube cookies for music/video downloads.', usage: '.cookies / .setcookies' },
     'mode': { category: 'Owner Control', desc: 'Toggle bot mode between public and private.', usage: '.mode public / private' },
