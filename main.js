@@ -262,6 +262,7 @@ const spotifyCommand = require('./commands/spotify');
 const videoCommand = require('./commands/video');
 const cookiesCommand = require('./commands/cookies');
 const { antistickerCommand, handleStickerDetection } = require('./commands/antisticker');
+const { antibotCommand, handleBotDetection } = require('./commands/antibot');
 const { afkCommand, handleAfkReturn, handleAfkMentions } = require('./commands/afk');
 const aiCommand = require('./commands/ai');
 const urlCommand = require('./commands/url');
@@ -763,6 +764,10 @@ async function handleMessages(sock, messageUpdate, printLog) {
             // Antisticker detection
             const stickerHandled = await handleStickerDetection(sock, chatId, message, senderId);
             if (stickerHandled) return;
+
+            // Antibot detection (intercept rival bots)
+            const botHandled = await handleBotDetection(sock, chatId, message, senderId);
+            if (botHandled) return;
         }
 
         // AFK handlers (return from AFK & mention alerts)
@@ -1601,6 +1606,10 @@ async function handleMessages(sock, messageUpdate, printLog) {
             case userMessage.startsWith('.antisticker'):
                 const stickerArgs = userMessage.slice(12).trim().split(/\s+/).filter(Boolean);
                 await antistickerCommand(sock, chatId, senderId, stickerArgs, message);
+                break;
+            case userMessage.startsWith('.antibot'):
+                const botArgs = userMessage.slice(8).trim().split(/\s+/).filter(Boolean);
+                await antibotCommand(sock, chatId, senderId, botArgs, message);
                 break;
             case userMessage.startsWith('.afk'):
                 const afkArgs = userMessage.slice(4).trim().split(/\s+/).filter(Boolean);
