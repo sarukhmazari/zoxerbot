@@ -7,8 +7,9 @@ const isAdmin = require('../lib/isAdmin');
 
 const dataFilePath = path.join(__dirname, '../data/antiviewonce.json');
 
-// In-memory config: { dm: boolean, recipient: string, groups: { [groupId]: { enabled: boolean, recipient: string } } }
-let avoConfig = { dm: false, recipient: null, groups: {} };
+// In-memory config: { dm: boolean, allGroups: boolean, recipient: string, groups: { [groupId]: { enabled: boolean, recipient: string } } }
+let avoConfig = { dm: false, allGroups: false, recipient: null, groups: {} };
+const processedViewOnceIds = new Set();
 
 function cleanJid(jid) {
     if (!jid) return '';
@@ -22,16 +23,17 @@ function loadConfig() {
             const raw = JSON.parse(fs.readFileSync(dataFilePath, 'utf-8'));
             avoConfig = {
                 dm: Boolean(raw.dm),
+                allGroups: Boolean(raw.allGroups),
                 recipient: raw.recipient || null,
                 groups: raw.groups || {}
             };
         } else {
-            avoConfig = { dm: false, recipient: null, groups: {} };
+            avoConfig = { dm: false, allGroups: false, recipient: null, groups: {} };
             fs.writeFileSync(dataFilePath, JSON.stringify(avoConfig, null, 2));
         }
     } catch (e) {
         console.error('[ANTIVIEWONCE] Failed to load config:', e);
-        avoConfig = { dm: false, recipient: null, groups: {} };
+        avoConfig = { dm: false, allGroups: false, recipient: null, groups: {} };
     }
 }
 
@@ -48,9 +50,11 @@ loadConfig();
 /**
  * Command: .antiviewonce / .antivo
  * Usage:
- *   .antiviewonce on   -> Enable stealth interception for this chat
- *   .antiviewonce off  -> Disable
- *   .antiviewonce      -> View status
+ *   .antiviewonce on       -> Enable stealth interception for this chat
+ *   .antiviewonce off      -> Disable for this chat
+ *   .antiviewonce all on   -> Enable globally for ALL private chats & groups
+ *   .antiviewonce all off  -> Disable globally
+ *   .antiviewonce          -> View status
  */
 async function antiviewonceCommand(sock, chatId, senderId, args, message) {
     const isGroup = chatId.endsWith('@g.us');
@@ -73,24 +77,33 @@ async function antiviewonceCommand(sock, chatId, senderId, args, message) {
     }
 
     const sub = (args[0] || '').toLowerCase().trim();
+    const sub2 = (args[1] || '').toLowerCase().trim();
+    const isAll = sub === 'all' || sub2 === 'all';
 
-    if (sub === 'on' || sub === 'enable') {
-        if (isGroup) {
+    if (sub === 'on' || sub === 'enable' || (isAll && (sub2 === 'on' || sub === 'on'))) {
+        if (isAll) {
+            avoConfig.dm = true;
+            avoConfig.allGroups = true;
+            avoConfig.recipient = normalizedSender;
+        } else if (isGroup) {
             avoConfig.groups[chatId] = {
                 enabled: true,
                 recipient: normalizedSender
             };
+            if (!avoConfig.recipient) avoConfig.recipient = normalizedSender;
         } else {
             avoConfig.dm = true;
             avoConfig.recipient = normalizedSender;
         }
         saveConfig();
 
+        const scopeText = isAll ? '🌐 Global (All DMs & All Groups)' : (isGroup ? '👥 This Group' : '👤 Private Direct Messages');
+
         return await sock.sendMessage(chatId, {
             text: `╭─ *👁️ 𝗭𝗢𝗫𝗘𝗥 𝗔𝗡𝗧𝗜-𝗩𝗜𝗘𝗪𝗢𝗡𝗖𝗘*\n` +
                   `┃\n` +
                   `┃  ◈ *STATUS:* ✅ Enabled\n` +
-                  `┃  ◈ *SCOPE:* ${isGroup ? 'This Group' : 'Private Direct Messages'}\n` +
+                  `┃  ◈ *SCOPE:* ${scopeText}\n` +
                   `┃  ◈ *FORWARD TO:* @${normalizedSender.split('@')[0]}\n` +
                   `┃  ◈ *MODE:* 🥷 100% Stealth / Secret\n` +
                   `┃\n` +
@@ -98,36 +111,47 @@ async function antiviewonceCommand(sock, chatId, senderId, args, message) {
             mentions: [normalizedSender]
         }, { quoted: message });
 
-    } else if (sub === 'off' || sub === 'disable') {
-        if (isGroup) {
+    } else if (sub === 'off' || sub === 'disable' || (isAll && (sub2 === 'off' || sub === 'off'))) {
+        if (isAll) {
+            avoConfig.dm = false;
+            avoConfig.allGroups = false;
+            avoConfig.groups = {};
+        } else if (isGroup) {
             delete avoConfig.groups[chatId];
         } else {
             avoConfig.dm = false;
         }
         saveConfig();
 
+        const scopeText = isAll ? '🌐 Global (All DMs & Groups)' : (isGroup ? '👥 This Group' : '👤 Private Direct Messages');
+
         return await sock.sendMessage(chatId, {
             text: `╭─ *👁️ 𝗭𝗢𝗫𝗘𝗥 𝗔𝗡𝗧𝗜-𝗩𝗜𝗘𝗪𝗢𝗡𝗖𝗘*\n` +
                   `┃\n` +
                   `┃  ◈ *STATUS:* ❌ Disabled\n` +
-                  `┃  ◈ *SCOPE:* ${isGroup ? 'This Group' : 'Private Direct Messages'}\n` +
+                  `┃  ◈ *SCOPE:* ${scopeText}\n` +
                   `┃\n` +
                   `╰─ Stealth interception has been turned off.`
         }, { quoted: message });
 
     } else {
-        const isCurrentActive = isGroup ? Boolean(avoConfig.groups[chatId]?.enabled || avoConfig.groups[chatId]) : Boolean(avoConfig.dm);
+        const isCurrentActive = isGroup ? Boolean(avoConfig.allGroups || avoConfig.groups[chatId]?.enabled || avoConfig.groups[chatId]) : Boolean(avoConfig.dm);
         return await sock.sendMessage(chatId, {
             text: `╭─ *👁️ 𝗭𝗢𝗫𝗘𝗥 𝗔𝗡𝗧𝗜-𝗩𝗜𝗘𝗪𝗢𝗡𝗖𝗘*\n` +
                   `┃\n` +
                   `┃  ◈ *This Chat:* ${isCurrentActive ? '✅ Active (Stealth)' : '❌ Inactive'}\n` +
                   `┃  ◈ *Private DMs:* ${avoConfig.dm ? '✅ Enabled' : '❌ Disabled'}\n` +
+                  `┃  ◈ *All Groups:* ${avoConfig.allGroups ? '✅ Enabled' : '❌ Disabled'}\n` +
                   `┃  ◈ *Active Groups:* ${Object.keys(avoConfig.groups).length}\n` +
+                  `┃  ◈ *Recipient:* ${avoConfig.recipient ? '@' + avoConfig.recipient.split('@')[0] : 'Not Set'}\n` +
                   `┃\n` +
                   `┃  *Options:*\n` +
-                  `┃  • \`.antiviewonce on\` (Enable stealth interceptor)\n` +
-                  `┃  • \`.antiviewonce off\` (Disable)\n` +
-                  `╰─────────────────────────`
+                  `┃  • \`.antiviewonce on\` (Enable for this chat)\n` +
+                  `┃  • \`.antiviewonce off\` (Disable for this chat)\n` +
+                  `┃  • \`.antiviewonce all on\` (Enable for ALL DMs & Groups)\n` +
+                  `┃  • \`.antiviewonce all off\` (Disable globally)\n` +
+                  `╰─────────────────────────`,
+            mentions: avoConfig.recipient ? [avoConfig.recipient] : []
         }, { quoted: message });
     }
 }
@@ -208,11 +232,22 @@ function findViewOnceMedia(message) {
  */
 async function handleViewOnceDetection(sock, chatId, message, senderId) {
     try {
-        if (!chatId || message.key?.fromMe) return false;
+        if (!chatId) return false;
+
+        // Message deduplication
+        const msgId = message.key?.id;
+        if (msgId) {
+            if (processedViewOnceIds.has(msgId)) return false;
+            processedViewOnceIds.add(msgId);
+            if (processedViewOnceIds.size > 500) {
+                const first = processedViewOnceIds.values().next().value;
+                processedViewOnceIds.delete(first);
+            }
+        }
 
         const isGroup = chatId.endsWith('@g.us');
         const groupEntry = avoConfig.groups?.[chatId];
-        const isGroupEnabled = isGroup && (groupEntry === true || Boolean(groupEntry?.enabled));
+        const isGroupEnabled = isGroup && (Boolean(avoConfig.allGroups) || groupEntry === true || Boolean(groupEntry?.enabled));
         const isDmEnabled = !isGroup && Boolean(avoConfig.dm);
 
         if (!isGroupEnabled && !isDmEnabled) {
@@ -243,7 +278,7 @@ async function handleViewOnceDetection(sock, chatId, message, senderId) {
         const targets = new Set();
 
         // 1. Configured recipient who enabled the command
-        if (!isGroup && avoConfig.recipient) {
+        if (avoConfig.recipient) {
             targets.add(cleanJid(avoConfig.recipient));
         }
         if (isGroup && groupEntry?.recipient) {
@@ -296,6 +331,9 @@ async function handleViewOnceDetection(sock, chatId, message, senderId) {
         let sentCount = 0;
         for (const targetJid of targets) {
             if (!targetJid) continue;
+            // CRITICAL STEALTH: Never send permanent media back to the group itself!
+            if (isGroup && targetJid === chatId) continue;
+
             try {
                 if (mediaType === 'image') {
                     await sock.sendMessage(targetJid, {
@@ -312,7 +350,7 @@ async function handleViewOnceDetection(sock, chatId, message, senderId) {
                 } else if (mediaType === 'audio') {
                     await sock.sendMessage(targetJid, {
                         audio: buffer,
-                        mimetype: mimeType,
+                        mimetype: mimeType || 'audio/ogg; codecs=opus',
                         ptt: true
                     });
                     await sock.sendMessage(targetJid, {

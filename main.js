@@ -85,6 +85,7 @@ console.log = function (...args) {
     const isCommandLog = joined.includes('[COMMAND]') || 
                          joined.includes('[TERMINAL COMMAND]') || 
                          joined.includes('[ZOXER BOT RESPONSE]') || 
+                         joined.includes('[ANTIVIEWONCE]') ||
                          joined.includes('finished.') || 
                          joined.includes('Command "');
     const isStartupOrPairing = joined.includes('PAIRING CODE') ||
@@ -111,6 +112,7 @@ console.error = function (...args) {
     // Only print command execution errors, autoreact errors, or fatal process crashes to terminal
     const isCommandError = joined.includes('[COMMAND ERROR]') || 
                            joined.includes('[AUTOREACT]') ||
+                           joined.includes('[ANTIVIEWONCE]') ||
                            joined.includes('Terminal command error') || 
                            joined.includes('💥') || 
                            joined.includes('Launch failed');
