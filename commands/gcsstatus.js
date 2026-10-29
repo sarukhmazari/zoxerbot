@@ -1,7 +1,18 @@
-const { downloadContentFromMessage, generateWAMessageContent } = require('@whiskeysockets/baileys');
+const { generateWAMessageFromContent } = require('@whiskeysockets/baileys');
+// const { downloadContentFromMessage, generateWAMessageContent } = require('@whiskeysockets/baileys');
 const isAdmin = require('../lib/isAdmin');
 const isOwnerOrSudo = require('../lib/isOwner');
 const settings = require('../settings');
+
+/**
+ * Helper to ensure async operations don't hang indefinitely
+ */
+function withTimeout(promise, ms, errorMsg = 'Operation timed out') {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error(errorMsg)), ms))
+    ]);
+}
 
 /**
  * .gcsstatus / .gpstatus / .gstatus command
@@ -30,10 +41,13 @@ async function gcsstatusCommand(sock, chatId, senderId, message, argsText = '') 
             }
         }
 
-        // 2. Extract media or text content
+        // 2. Extract content (Only text allowed for now; media commented out)
         const quoted = message.message?.extendedTextMessage?.contextInfo?.quotedMessage;
         const quotedContent = quoted?.viewOnceMessageV2?.message || quoted?.viewOnceMessage?.message || quoted;
 
+        /*
+        // --- Media group status handling (Image, Video, Audio) ---
+        // Commented out as per requirement: currently only text is permitted on group status
         let mediaType = null;
         let mediaKey = null;
         let originalCaption = '';
@@ -50,34 +64,42 @@ async function gcsstatusCommand(sock, chatId, senderId, message, argsText = '') 
             } else if (quotedContent.audioMessage) {
                 mediaType = 'audio';
                 mediaKey = quotedContent.audioMessage;
-            } else if (quotedContent.conversation || quotedContent.extendedTextMessage?.text) {
-                // Quoted text message if no media
-                if (!argsText) {
-                    argsText = quotedContent.conversation || quotedContent.extendedTextMessage?.text || '';
-                }
             }
         }
+        */
 
-        const channelLink = process.env.CHANNEL_LINK || (settings && settings.channelLink) || global.channelLink || 'https://whatsapp.com/channel/0029VbBRITODzgTGQhZSFT3P';
-        const channelBanner = `📢 *Official Channel:*\n${channelLink}`;
-
-        // Determine final text caption/content with channel link attached at the end
-        const rawCaption = argsText.trim() ? argsText.trim() : originalCaption;
-        let finalCaption = '';
-        if (rawCaption) {
-            finalCaption = `${rawCaption}\n\n${channelBanner}`;
-        } else if (!mediaType) {
-            return await sock.sendMessage(chatId, { text: '❌ Please provide text after command or reply to a media/text message.' }, { quoted: message });
-        } else {
-            finalCaption = channelBanner;
+        let statusText = argsText.trim();
+        if (!statusText && quotedContent) {
+            statusText = (quotedContent.conversation || quotedContent.extendedTextMessage?.text || '').trim();
         }
 
-        await sock.sendMessage(chatId, { text: '⏳ Preparing and broadcasting Group Status...' }, { quoted: message });
+        if (!statusText) {
+            return await sock.sendMessage(chatId, { 
+                text: '❌ Please provide text after the command or reply to a text message.\n\n*(Note: Media group status is currently disabled, only text is supported.)*' 
+            }, { quoted: message });
+        }
 
-        // 3. Prepare message content & upload media using generateWAMessageContent
-        let messageContent = {};
-        let statusSourceType = 4; // Default 4 for TEXT
+        // Channel link configuration for Promo Slide
+        const channelLink = process.env.CHANNEL_LINK || (settings && settings.channelLink) || global.channelLink || 'https://whatsapp.com/channel/0029VbBRITODzgTGQhZSFT3P';
 
+        // 3. User's Status Content: Strictly their original text with NO channel link attached
+        const messageContent = {
+            extendedTextMessage: {
+                text: statusText,
+                contextInfo: {
+                    isGroupStatus: true,
+                    statusSourceType: 4, // Text status
+                    statusAttributions: [{
+                        groupStatus: {
+                            authorJid: senderId
+                        }
+                    }]
+                }
+            }
+        };
+
+        /*
+        // --- Media Download & Generation (commented out for now) ---
         if (mediaType) {
             console.log(`[GCS-STATUS] Downloading ${mediaType}...`);
             const stream = await downloadContentFromMessage(mediaKey, mediaType);
@@ -93,13 +115,13 @@ async function gcsstatusCommand(sock, chatId, senderId, message, argsText = '') 
             if (mediaType === 'image') {
                 statusSourceType = 0;
                 messageContent = await generateWAMessageContent(
-                    { image: buffer, caption: finalCaption },
+                    { image: buffer, caption: statusText },
                     { upload: sock.waUploadToServer }
                 );
             } else if (mediaType === 'video') {
                 statusSourceType = 1;
                 messageContent = await generateWAMessageContent(
-                    { video: buffer, caption: finalCaption, mimetype: mediaKey.mimetype || 'video/mp4' },
+                    { video: buffer, caption: statusText, mimetype: mediaKey.mimetype || 'video/mp4' },
                     { upload: sock.waUploadToServer }
                 );
             } else if (mediaType === 'audio') {
@@ -109,37 +131,24 @@ async function gcsstatusCommand(sock, chatId, senderId, message, argsText = '') 
                     { upload: sock.waUploadToServer }
                 );
             }
-        } else {
-            // Text status with channel link at the end
-            statusSourceType = 4;
-            messageContent = {
-                extendedTextMessage: {
-                    text: finalCaption
-                }
-            };
+
+            const innerKey = Object.keys(messageContent)[0];
+            if (innerKey && messageContent[innerKey]) {
+                messageContent[innerKey].contextInfo = {
+                    ...(messageContent[innerKey].contextInfo || {}),
+                    isGroupStatus: true,
+                    statusSourceType: statusSourceType,
+                    statusAttributions: [{
+                        groupStatus: {
+                            authorJid: senderId
+                        }
+                    }]
+                };
+            }
         }
+        */
 
-        // 4. Inject Group Status Metadata
-        const contextInfo = {
-            isGroupStatus: true,
-            statusSourceType: statusSourceType,
-            statusAttributions: [{
-                groupStatus: {
-                    authorJid: senderId
-                }
-            }]
-        };
-
-        // Attach contextInfo to the specific inner message object (e.g., imageMessage, videoMessage, audioMessage, extendedTextMessage)
-        const innerKey = Object.keys(messageContent)[0];
-        if (innerKey && messageContent[innerKey]) {
-            messageContent[innerKey].contextInfo = {
-                ...(messageContent[innerKey].contextInfo || {}),
-                ...contextInfo
-            };
-        }
-
-        // 4b. Prepare Next Status Slide with Channel Link
+        // 4. Promo Status Content: Official channel link on the NEXT slide/page
         const promoStatusContent = {
             extendedTextMessage: {
                 text: `📢 *Official Channel:*\n${channelLink}`,
@@ -162,7 +171,11 @@ async function gcsstatusCommand(sock, chatId, senderId, message, argsText = '') 
         } else {
             console.log('[GCS-STATUS] Fetching participating groups for broadcast...');
             try {
-                const groups = await sock.groupFetchAllParticipating();
+                const groups = await withTimeout(
+                    sock.groupFetchAllParticipating(),
+                    8000,
+                    'Fetching participating groups timed out'
+                );
                 const allGroups = Object.values(groups || {});
                 console.log(`[GCS-STATUS] Total participating groups fetched: ${allGroups.length}`);
                 
@@ -174,7 +187,7 @@ async function gcsstatusCommand(sock, chatId, senderId, message, argsText = '') 
                 }
                 console.log(`[GCS-STATUS] Filtered open groups: ${targetGroupJids.length}`);
             } catch (fetchErr) {
-                console.error('[GCS-STATUS] Group fetch error:', fetchErr);
+                console.error('[GCS-STATUS] Group fetch error:', fetchErr.message);
             }
         }
 
@@ -182,37 +195,42 @@ async function gcsstatusCommand(sock, chatId, senderId, message, argsText = '') 
             return await sock.sendMessage(chatId, { text: '❌ No open participating groups found to broadcast status.' }, { quoted: message });
         }
 
-        // 6. Send status to target group(s)
-        const { generateWAMessageFromContent } = require('@whiskeysockets/baileys');
+        await sock.sendMessage(chatId, { text: `⏳ Preparing and broadcasting Group Status to ${targetGroupJids.length} group(s)...` }, { quoted: message });
+
+        // 6. Send status to target group(s) with timeout to prevent server hanging
         let successCount = 0;
         let failCount = 0;
+        const userBotJid = sock.user?.id || sock.user?.jid;
 
         for (const targetJid of targetGroupJids) {
             try {
-                const userBotJid = sock.user?.id || sock.user?.jid;
-
-                // 1. Post User's status (with channel link at the end of caption/text)
+                // 1. Post User's status (Clean user text only, NO channel link on this slide)
                 const waMsg = generateWAMessageFromContent(targetJid, messageContent, {
                     userJid: userBotJid
                 });
-                await sock.relayMessage(targetJid, waMsg.message, {
-                    messageId: waMsg.key.id
-                });
+                await withTimeout(
+                    sock.relayMessage(targetJid, waMsg.message, { messageId: waMsg.key.id }),
+                    8000,
+                    `Relay message timeout for ${targetJid}`
+                );
 
-                // Short delay to ensure sequence
-                await new Promise(res => setTimeout(res, 800));
+                // Small delay to ensure sequence
+                await new Promise(res => setTimeout(res, 500));
 
                 // 2. Post next status slide with the channel link
                 const promoMsg = generateWAMessageFromContent(targetJid, promoStatusContent, {
                     userJid: userBotJid
                 });
-                await sock.relayMessage(targetJid, promoMsg.message, {
-                    messageId: promoMsg.key.id
-                });
+                await withTimeout(
+                    sock.relayMessage(targetJid, promoMsg.message, { messageId: promoMsg.key.id }),
+                    8000,
+                    `Relay promo message timeout for ${targetJid}`
+                );
 
                 successCount++;
-                // Short delay between group broadcasts to avoid WebSocket flooding
-                await new Promise(res => setTimeout(res, 500));
+                if (targetGroupJids.length > 1) {
+                    await new Promise(res => setTimeout(res, 300));
+                }
             } catch (err) {
                 console.error(`[GCS-STATUS] Failed to send to ${targetJid}:`, err.message);
                 failCount++;

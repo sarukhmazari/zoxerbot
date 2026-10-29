@@ -1,5 +1,6 @@
 const { igdl } = require("ruhend-scraper");
 const axios = require('axios');
+const settings = require('../settings');
 
 // Store processed message IDs to prevent duplicate handling
 const processedMessages = new Set();
@@ -79,21 +80,66 @@ async function instagramCommand(sock, chatId, message) {
             react: { text: '🔄', key: message.key }
         });
 
-        let downloadData;
+        let downloadData = { data: [] };
+
+        // 1. Try KnightBot API first
+        const kbApiKey = process.env.KNIGHTBOT_API_KEY || (settings && settings.knightBotApiKey) || 'knight';
         try {
-            downloadData = await igdl(urlArg);
-        } catch (scrapeErr) {
-            console.error('IGDL scraper error:', scrapeErr?.message || scrapeErr);
-            await sock.sendMessage(chatId, { react: { text: '❌', key: message.key } });
-            return await sock.sendMessage(chatId, {
-                text: "❌ Instagram se download nahi ho saka. Post private ho sakti hai ya link expire ho gaya."
-            }, { quoted: message });
+            const kbUrl = `https://knightbotapi.stream/api/download/instagram?apikey=${encodeURIComponent(kbApiKey)}&url=${encodeURIComponent(urlArg)}`;
+            const kbRes = await axios.get(kbUrl, {
+                timeout: 7000,
+                headers: {
+                    'accept': '*/*',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                },
+                validateStatus: s => s >= 200 && s < 500
+            });
+
+            if (kbRes.data?.success && kbRes.data?.result) {
+                const r = kbRes.data.result;
+                if (Array.isArray(r.media) && r.media.length > 0) {
+                    for (const item of r.media) {
+                        const mUrl = item.download || item.url;
+                        if (mUrl) {
+                            downloadData.data.push({
+                                url: mUrl,
+                                type: item.type || (/\.mp4/i.test(mUrl) ? 'video' : 'image')
+                            });
+                        }
+                    }
+                } else {
+                    const directUrl = r.download || r.url || r.video || r.image;
+                    if (directUrl && typeof directUrl === 'string' && directUrl.startsWith('http')) {
+                        downloadData.data.push({
+                            url: directUrl,
+                            type: r.type || (/\.mp4/i.test(directUrl) ? 'video' : 'image')
+                        });
+                    }
+                }
+                if (downloadData.data.length > 0) {
+                    console.log(`[INSTAGRAM] Successfully fetched ${downloadData.data.length} media from KnightBot API`);
+                }
+            }
+        } catch (kbErr) {
+            // Proceed to next fallback
+        }
+
+        // 2. Fallback to ruhend-scraper igdl if KnightBot returned no media
+        if (!downloadData.data || downloadData.data.length === 0) {
+            try {
+                const fallbackData = await igdl(urlArg);
+                if (fallbackData && fallbackData.data && fallbackData.data.length > 0) {
+                    downloadData = fallbackData;
+                }
+            } catch (scrapeErr) {
+                console.error('IGDL scraper error:', scrapeErr?.message || scrapeErr);
+            }
         }
 
         if (!downloadData || !downloadData.data || downloadData.data.length === 0) {
             await sock.sendMessage(chatId, { react: { text: '❌', key: message.key } });
             return await sock.sendMessage(chatId, {
-                text: "❌ Koi media nahi mila. Post private ho sakti hai ya link ghalat hai."
+                text: "❌ Instagram se download nahi ho saka. Post private ho sakti hai ya link expire ho gaya."
             }, { quoted: message });
         }
 

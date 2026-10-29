@@ -18,7 +18,8 @@ const settings = {
   connectionImagePath: process.env.CONNECTION_IMAGE_PATH || "./zoxer.jfif",
   newsletters: [
     '120363404139113188@newsletter'
-  ]
+  ],
+  knightBotApiKey: process.env.KNIGHTBOT_API_KEY || 'knight'
 };
 
 module.exports = settings;

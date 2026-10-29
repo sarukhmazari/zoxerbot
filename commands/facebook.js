@@ -1,6 +1,7 @@
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const settings = require('../settings');
 
 async function facebookCommand(sock, chatId, message) {
     try {
@@ -37,52 +38,85 @@ async function facebookCommand(sock, chatId, message) {
             // ignore resolution errors; use original url
         }
 
-        // Use Hanggts API
-        async function fetchFromApi(u) {
-            const apiUrl = `https://api.hanggts.xyz/download/facebook?url=${encodeURIComponent(u)}`;
+        let fbvid = null;
+        let title = null;
 
+        // 1. Try KnightBot API first
+        const kbApiKey = process.env.KNIGHTBOT_API_KEY || (settings && settings.knightBotApiKey) || 'knight';
+        const urlsToTest = resolvedUrl !== url ? [resolvedUrl, url] : [url];
+        for (const testUrl of urlsToTest) {
+            if (fbvid) break;
             try {
-                const response = await axios.get(apiUrl, {
-                    timeout: 20000,
+                const kbUrl = `https://knightbotapi.stream/api/download/facebook?apikey=${encodeURIComponent(kbApiKey)}&url=${encodeURIComponent(testUrl)}`;
+                const kbRes = await axios.get(kbUrl, {
+                    timeout: 7000,
                     headers: {
                         'accept': '*/*',
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                     },
-                    maxRedirects: 5,
                     validateStatus: s => s >= 200 && s < 500
                 });
 
-                if (response.data) {
-                    // Accept response if status is true, or if response has data/result/url fields
-                    if (response.data.status === true ||
-                        response.data.result ||
-                        response.data.data ||
-                        response.data.url ||
-                        response.data.download ||
-                        response.data.video) {
-                        return { response, apiName: 'Hanggts API' };
+                if (kbRes.data?.success && kbRes.data?.result) {
+                    const r = kbRes.data.result;
+                    const directVid = r.download || r.video_hd || r.video_sd || r.url || r.video;
+                    if (directVid && typeof directVid === 'string' && directVid.startsWith('http')) {
+                        fbvid = directVid;
+                        title = r.title || 'Facebook Video';
+                        console.log('[FB-DOWNLOAD] Successfully fetched video from KnightBot API');
+                        break;
                     }
                 }
-            } catch (error) {
-                console.error(`Hanggts API failed: ${error.message}`);
+            } catch (kbErr) {
+                // Ignore and proceed to fallback
             }
-            throw new Error('Hanggts API failed');
         }
 
-        // Try resolved URL, then fallback to original URL
-        let apiResult;
-        try {
-            apiResult = await fetchFromApi(resolvedUrl);
-        } catch {
-            apiResult = await fetchFromApi(url);
-        }
+        // 2. Fallback to Hanggts API if KnightBot didn't return a video
+        if (!fbvid) {
+            async function fetchFromApi(u) {
+                const apiUrl = `https://api.hanggts.xyz/download/facebook?url=${encodeURIComponent(u)}`;
 
-        const response = apiResult.response;
-        const apiName = apiResult.apiName;
-        const data = response.data;
+                try {
+                    const response = await axios.get(apiUrl, {
+                        timeout: 20000,
+                        headers: {
+                            'accept': '*/*',
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                        },
+                        maxRedirects: 5,
+                        validateStatus: s => s >= 200 && s < 500
+                    });
 
-        let fbvid = null;
-        let title = null;
+                    if (response.data) {
+                        if (response.data.status === true ||
+                            response.data.result ||
+                            response.data.data ||
+                            response.data.url ||
+                            response.data.download ||
+                            response.data.video) {
+                            return { response, apiName: 'Hanggts API' };
+                        }
+                    }
+                } catch (error) {
+                    console.error(`Hanggts API failed: ${error.message}`);
+                }
+                throw new Error('Hanggts API failed');
+            }
+
+            let apiResult;
+            try {
+                apiResult = await fetchFromApi(resolvedUrl);
+            } catch {
+                try {
+                    apiResult = await fetchFromApi(url);
+                } catch {
+                    apiResult = null;
+                }
+            }
+
+            if (apiResult?.response?.data) {
+                const data = apiResult.response.data;
 
         // Handle Hanggts API response format
         // Try parsing even if status is not explicitly true
@@ -156,6 +190,8 @@ async function facebookCommand(sock, chatId, message) {
                 title = data.title || data.video.title || "Facebook Video";
             }
         }
+    }
+}
 
         if (!fbvid) {
             return await sock.sendMessage(chatId, {

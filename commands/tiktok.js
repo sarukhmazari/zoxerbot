@@ -1,5 +1,6 @@
 const { ttdl } = require("ruhend-scraper");
 const axios = require('axios');
+const settings = require('../settings');
 
 // Store processed message IDs to prevent duplicates
 const processedMessages = new Set();
@@ -58,19 +59,42 @@ async function tiktokCommand(sock, chatId, message) {
         });
 
         try {
-            // Use only Siputzx API
-            const apiUrl = `https://api.siputzx.my.id/api/d/tiktok?url=${encodeURIComponent(url)}`;
-
-
-
             let videoUrl = null;
             let audioUrl = null;
             let title = null;
 
-            // Call Siputzx API
+            // 1. Try KnightBot API first
+            const kbApiKey = process.env.KNIGHTBOT_API_KEY || (settings && settings.knightBotApiKey) || 'knight';
             try {
-                const response = await axios.get(apiUrl, {
-                    timeout: 15000,
+                const kbUrl = `https://knightbotapi.stream/api/download/tiktok?apikey=${encodeURIComponent(kbApiKey)}&url=${encodeURIComponent(url)}`;
+                const kbRes = await axios.get(kbUrl, {
+                    timeout: 7000,
+                    headers: {
+                        'accept': '*/*',
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    },
+                    validateStatus: s => s >= 200 && s < 500
+                });
+
+                if (kbRes.data?.success && kbRes.data?.result) {
+                    const r = kbRes.data.result;
+                    const directVid = r.download || r.dl_url || r.dl || r.url || r.video;
+                    if (directVid && typeof directVid === 'string' && directVid.startsWith('http')) {
+                        videoUrl = directVid;
+                        title = r.title || "TikTok Video";
+                        console.log('[TIKTOK] Successfully fetched from KnightBot API');
+                    }
+                }
+            } catch (kbErr) {
+                // Proceed to next fallback
+            }
+
+            // 2. Fallback to Siputzx API
+            if (!videoUrl) {
+                const apiUrl = `https://api.siputzx.my.id/api/d/tiktok?url=${encodeURIComponent(url)}`;
+                try {
+                    const response = await axios.get(apiUrl, {
+                        timeout: 15000,
                     headers: {
                         'accept': '*/*',
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -106,6 +130,7 @@ async function tiktokCommand(sock, chatId, message) {
             } catch (apiError) {
                 console.error(`Siputzx API failed: ${apiError.message}`);
             }
+        }
 
             // If Siputzx API didn't work, try the original ttdl method
             if (!videoUrl) {

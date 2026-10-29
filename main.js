@@ -257,6 +257,9 @@ const { setGroupDescription, setGroupName, setGroupPhoto } = require('./commands
 const instagramCommand = require('./commands/instagram');
 const facebookCommand = require('./commands/facebook');
 const tiktokCommand = require('./commands/tiktok');
+const songCommand = require('./commands/song');
+const spotifyCommand = require('./commands/spotify');
+const videoCommand = require('./commands/video');
 const aiCommand = require('./commands/ai');
 const urlCommand = require('./commands/url');
 const qcCommand = require('./commands/qc');
@@ -1568,6 +1571,15 @@ async function handleMessages(sock, messageUpdate, printLog) {
             case userMessage.startsWith('.tiktok') || userMessage.startsWith('.tt'):
                 await tiktokCommand(sock, chatId, message);
                 break;
+            case userMessage.startsWith('.song') || userMessage.startsWith('.play') || userMessage.startsWith('.mp3 '):
+                await songCommand(sock, chatId, message);
+                break;
+            case userMessage.startsWith('.spotify') || userMessage.startsWith('.sp ') || userMessage === '.sp':
+                await spotifyCommand(sock, chatId, message);
+                break;
+            case userMessage.startsWith('.video') || userMessage.startsWith('.ytmp4') || userMessage.startsWith('.ytvideo'):
+                await videoCommand(sock, chatId, message);
+                break;
             case userMessage.startsWith('.gpt') || userMessage.startsWith('.gemini'):
                 await aiCommand(sock, chatId, message);
                 break;
@@ -1734,7 +1746,9 @@ async function handleMessages(sock, messageUpdate, printLog) {
             case userMessage.startsWith('.gcsstatus') || userMessage.startsWith('.gpstatus') || userMessage.startsWith('.gstatus') || userMessage.startsWith('.gcstatus') || userMessage.startsWith('.groupstatus') || userMessage.startsWith('.gorupstatus'):
                 {
                     const argsText = rawText.replace(/^\.(gcsstatus|gpstatus|gstatus|gcstatus|groupstatus|gorupstatus)\s*/i, '').trim();
-                    await gcsstatusCommand(sock, chatId, senderId, message, argsText);
+                    gcsstatusCommand(sock, chatId, senderId, message, argsText).catch(err => {
+                        console.error('[GCS-STATUS] Background execution error:', err.message);
+                    });
                 }
                 break;
             case userMessage === '.crop':
