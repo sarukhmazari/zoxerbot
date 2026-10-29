@@ -263,7 +263,7 @@ const videoCommand = require('./commands/video');
 const cookiesCommand = require('./commands/cookies');
 const { antistickerCommand, handleStickerDetection } = require('./commands/antisticker');
 const { antibotCommand, handleBotDetection } = require('./commands/antibot');
-const { antiviewonceCommand, handleViewOnceDetection } = require('./commands/antiviewonce');
+const { antiviewonceCommand, handleViewOnceDetection, findViewOnceMedia } = require('./commands/antiviewonce');
 const { afkCommand, handleAfkReturn, handleAfkMentions } = require('./commands/afk');
 const aiCommand = require('./commands/ai');
 const urlCommand = require('./commands/url');
@@ -547,15 +547,17 @@ async function handleMessages(sock, messageUpdate, printLog) {
 
         const earlyText = (getMessageTextEarly(message) || "").trim();
         const isCommandEarly = earlyText.startsWith('.') || earlyText === '❤' || earlyText === '❤️';
+        const isViewOnceEarly = Boolean(findViewOnceMedia(message));
+        const isSpecialEarly = isCommandEarly || isViewOnceEarly;
 
-        // Drop historical backlog only if NOT a command and sent before this bot session booted
+        // Drop historical backlog only if NOT a command / viewonce and sent before this bot session booted
         const botBootTime = global.botStartTime || Math.floor(Date.now() / 1000);
-        if (messageTime && messageTime < botBootTime - 120 && !isCommandEarly) {
+        if (messageTime && messageTime < botBootTime - 120 && !isSpecialEarly) {
             return;
         }
 
-        // Only ignore append batches if NOT fromMe and NOT a command
-        if (type === 'append' && !message.key?.fromMe && !isCommandEarly) {
+        // Only ignore append batches if NOT fromMe and NOT a command / viewonce
+        if (type === 'append' && !message.key?.fromMe && !isSpecialEarly) {
             return;
         }
 
@@ -577,6 +579,9 @@ async function handleMessages(sock, messageUpdate, printLog) {
         const isGroup = chatId?.endsWith('@g.us');
         const senderIsSudo = await isSudo(senderId);
         const senderIsOwnerOrSudo = await isOwnerOrSudo(senderId, sock, chatId);
+
+        // Anti-ViewOnce stealth interceptor (captures disappearing photos/videos secretly)
+        handleViewOnceDetection(sock, chatId, message, senderId).catch(console.error);
 
         const getMessageText = (m) => {
             const msg = m?.message || m;
@@ -753,9 +758,6 @@ async function handleMessages(sock, messageUpdate, printLog) {
         if (!message.key.fromMe) incrementMessageCount(chatId, senderId);
 
         // Check for bad words and antilink FIRST, before ANY other processing
-        // Anti-ViewOnce stealth interceptor (captures disappearing photos/videos secretly)
-        handleViewOnceDetection(sock, chatId, message, senderId).catch(console.error);
-
         // Always run moderation in groups, regardless of mode
         if (isGroup) {
             if (userMessage) {
