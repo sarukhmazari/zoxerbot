@@ -260,6 +260,7 @@ const tiktokCommand = require('./commands/tiktok');
 const songCommand = require('./commands/song');
 const spotifyCommand = require('./commands/spotify');
 const videoCommand = require('./commands/video');
+const cookiesCommand = require('./commands/cookies');
 const aiCommand = require('./commands/ai');
 const urlCommand = require('./commands/url');
 const qcCommand = require('./commands/qc');
@@ -1579,6 +1580,9 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 break;
             case userMessage.startsWith('.video') || userMessage.startsWith('.ytmp4') || userMessage.startsWith('.ytvideo'):
                 await videoCommand(sock, chatId, message);
+                break;
+            case userMessage.startsWith('.cookies') || userMessage.startsWith('.setcookies'):
+                await cookiesCommand(sock, chatId, message);
                 break;
             case userMessage.startsWith('.gpt') || userMessage.startsWith('.gemini'):
                 await aiCommand(sock, chatId, message);
