@@ -19,7 +19,9 @@ const settings = {
   newsletters: [
     '120363404139113188@newsletter'
   ],
-  knightBotApiKey: process.env.KNIGHTBOT_API_KEY || 'knight'
+  knightBotApiKey: process.env.KNIGHTBOT_API_KEY || 'knight',
+  zoxerMediaApiUrl: process.env.ZOXER_MEDIA_API_URL || 'https://zoxer-media-api.sarukhmazari1.workers.dev',
+  zoxerMediaApiKey: process.env.ZOXER_MEDIA_API_KEY || 'zoxer_e4b5054d63fc1ed506cdafc9be5c858410b5f17e97a8a5da'
 };
 
 module.exports = settings;

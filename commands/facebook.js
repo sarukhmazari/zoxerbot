@@ -2,11 +2,12 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const settings = require('../settings');
+const { fetchMediaFromApi } = require('../lib/mediaApi');
 
 async function facebookCommand(sock, chatId, message) {
     try {
         const text = message.message?.conversation || message.message?.extendedTextMessage?.text;
-        const url = text.split(' ').slice(1).join(' ').trim();
+        const url = text ? text.split(/\s+/).slice(1).join(' ').trim() : '';
 
         if (!url) {
             return await sock.sendMessage(chatId, {
@@ -15,9 +16,16 @@ async function facebookCommand(sock, chatId, message) {
         }
 
         // Validate Facebook URL
-        if (!url.includes('facebook.com')) {
+        const fbPatterns = [
+            /https?:\/\/(?:www\.|m\.|web\.)?facebook\.com\//i,
+            /https?:\/\/fb\.watch\//i,
+            /https?:\/\/(?:www\.)?fb\.com\//i
+        ];
+
+        const isValidFb = fbPatterns.some(p => p.test(url));
+        if (!isValidFb) {
             return await sock.sendMessage(chatId, {
-                text: "That is not a Facebook link."
+                text: "That is not a valid Facebook link."
             }, { quoted: message });
         }
 
@@ -26,22 +34,56 @@ async function facebookCommand(sock, chatId, message) {
             react: { text: '🔄', key: message.key }
         });
 
-        // Resolve share/short URLs to their final destination first
+        // 1. Primary: Call private Cloudflare Workers Media API
+        try {
+            const media = await fetchMediaFromApi(url, 'video');
+            const downloadUrl = media.downloadUrl;
+            const title = media.title || 'Facebook Video';
+            const caption = `🎬 *${title}*\n\n⚡ *Downloaded by ZoxerBot*`;
+
+            try {
+                await sock.sendMessage(chatId, {
+                    video: { url: downloadUrl },
+                    caption: caption,
+                    ...global.channelInfo
+                }, { quoted: message });
+            } catch (streamError) {
+                console.warn('[FB-DOWNLOAD] Direct URL stream failed, attempting buffer fallback:', streamError.message);
+                const res = await axios.get(downloadUrl, {
+                    responseType: 'arraybuffer',
+                    timeout: 60000,
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    }
+                });
+                await sock.sendMessage(chatId, {
+                    video: Buffer.from(res.data),
+                    mimetype: 'video/mp4',
+                    caption: caption,
+                    ...global.channelInfo
+                }, { quoted: message });
+            }
+
+            await sock.sendMessage(chatId, { react: { text: '✅', key: message.key } });
+            return;
+        } catch (apiError) {
+            console.warn('[FB-DOWNLOAD] Private Media API returned:', apiError.message, '- trying fallback scrapers...');
+        }
+
+        // 2. Fallback: Resolve redirect and try KnightBot / Hanggts if private API fails
         let resolvedUrl = url;
         try {
-            const res = await axios.get(url, { timeout: 20000, maxRedirects: 10, headers: { 'User-Agent': 'Mozilla/5.0' } });
+            const res = await axios.get(url, { timeout: 15000, maxRedirects: 10, headers: { 'User-Agent': 'Mozilla/5.0' } });
             const possible = res?.request?.res?.responseUrl;
             if (possible && typeof possible === 'string') {
                 resolvedUrl = possible;
             }
-        } catch {
-            // ignore resolution errors; use original url
-        }
+        } catch (_) {}
 
         let fbvid = null;
-        let title = null;
+        let title = 'Facebook Video';
 
-        // 1. Try KnightBot API first
+        // Try KnightBot API fallback
         const kbApiKey = process.env.KNIGHTBOT_API_KEY || (settings && settings.knightBotApiKey) || 'knight';
         const urlsToTest = resolvedUrl !== url ? [resolvedUrl, url] : [url];
         for (const testUrl of urlsToTest) {
@@ -50,10 +92,7 @@ async function facebookCommand(sock, chatId, message) {
                 const kbUrl = `https://knightbotapi.stream/api/download/facebook?apikey=${encodeURIComponent(kbApiKey)}&url=${encodeURIComponent(testUrl)}`;
                 const kbRes = await axios.get(kbUrl, {
                     timeout: 7000,
-                    headers: {
-                        'accept': '*/*',
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                    },
+                    headers: { 'accept': '*/*', 'User-Agent': 'Mozilla/5.0' },
                     validateStatus: s => s >= 200 && s < 500
                 });
 
@@ -63,224 +102,56 @@ async function facebookCommand(sock, chatId, message) {
                     if (directVid && typeof directVid === 'string' && directVid.startsWith('http')) {
                         fbvid = directVid;
                         title = r.title || 'Facebook Video';
-                        console.log('[FB-DOWNLOAD] Successfully fetched video from KnightBot API');
                         break;
                     }
                 }
-            } catch (kbErr) {
-                // Ignore and proceed to fallback
-            }
+            } catch (_) {}
         }
 
-        // 2. Fallback to Hanggts API if KnightBot didn't return a video
+        // Try Hanggts API fallback if still not found
         if (!fbvid) {
-            async function fetchFromApi(u) {
-                const apiUrl = `https://api.hanggts.xyz/download/facebook?url=${encodeURIComponent(u)}`;
-
+            for (const testUrl of urlsToTest) {
+                if (fbvid) break;
                 try {
-                    const response = await axios.get(apiUrl, {
-                        timeout: 20000,
-                        headers: {
-                            'accept': '*/*',
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                        },
-                        maxRedirects: 5,
-                        validateStatus: s => s >= 200 && s < 500
+                    const hRes = await axios.get(`https://api.hanggts.xyz/download/facebook?url=${encodeURIComponent(testUrl)}`, {
+                        timeout: 15000,
+                        headers: { 'accept': '*/*', 'User-Agent': 'Mozilla/5.0' }
                     });
-
-                    if (response.data) {
-                        if (response.data.status === true ||
-                            response.data.result ||
-                            response.data.data ||
-                            response.data.url ||
-                            response.data.download ||
-                            response.data.video) {
-                            return { response, apiName: 'Hanggts API' };
-                        }
+                    const d = hRes.data;
+                    const directVid = d?.result?.media?.video_hd || d?.result?.media?.video_sd || d?.result?.url || d?.data?.url || d?.url;
+                    if (directVid && typeof directVid === 'string' && directVid.startsWith('http')) {
+                        fbvid = directVid;
+                        title = d?.result?.info?.title || d?.result?.title || 'Facebook Video';
+                        break;
                     }
-                } catch (error) {
-                    console.error(`Hanggts API failed: ${error.message}`);
-                }
-                throw new Error('Hanggts API failed');
-            }
-
-            let apiResult;
-            try {
-                apiResult = await fetchFromApi(resolvedUrl);
-            } catch {
-                try {
-                    apiResult = await fetchFromApi(url);
-                } catch {
-                    apiResult = null;
-                }
-            }
-
-            if (apiResult?.response?.data) {
-                const data = apiResult.response.data;
-
-        // Handle Hanggts API response format
-        // Try parsing even if status is not explicitly true
-        if (data) {
-            // Try different possible response structures
-            if (data.result) {
-                // Hanggts API format: data.result.media.video_hd or video_sd
-                if (data.result.media) {
-                    // Prefer HD, fallback to SD
-                    fbvid = data.result.media.video_hd || data.result.media.video_sd;
-                    title = data.result.info?.title || data.result.title || data.title || "Facebook Video";
-                }
-                // Check if result is an object with url
-                else if (typeof data.result === 'object' && data.result.url) {
-                    fbvid = data.result.url;
-                    title = data.result.title || data.result.caption || data.title || "Facebook Video";
-                }
-                // Check if result is a string (direct URL)
-                else if (typeof data.result === 'string' && data.result.startsWith('http')) {
-                    fbvid = data.result;
-                    title = data.title || "Facebook Video";
-                }
-                // Check if result has download or video property
-                else if (data.result.download) {
-                    fbvid = data.result.download;
-                    title = data.result.title || data.title || "Facebook Video";
-                } else if (data.result.video) {
-                    fbvid = data.result.video;
-                    title = data.result.title || data.title || "Facebook Video";
-                }
-            }
-
-            if (!fbvid && data.data) {
-                if (typeof data.data === 'object' && data.data.url) {
-                    fbvid = data.data.url;
-                    title = data.data.title || data.data.caption || data.title || "Facebook Video";
-                } else if (typeof data.data === 'string' && data.data.startsWith('http')) {
-                    fbvid = data.data;
-                    title = data.title || "Facebook Video";
-                } else if (Array.isArray(data.data) && data.data.length > 0) {
-                    // Array format - find best quality
-                    const hdVideo = data.data.find(item => (item.quality === 'HD' || item.quality === 'high') && (item.format === 'mp4' || !item.format));
-                    const sdVideo = data.data.find(item => (item.quality === 'SD' || item.quality === 'low') && (item.format === 'mp4' || !item.format));
-                    fbvid = hdVideo?.url || sdVideo?.url || data.data[0]?.url;
-                    title = hdVideo?.title || sdVideo?.title || data.data[0]?.title || data.title || "Facebook Video";
-                } else if (data.data.download) {
-                    fbvid = data.data.download;
-                    title = data.data.title || data.title || "Facebook Video";
-                } else if (data.data.video) {
-                    fbvid = data.data.video;
-                    title = data.data.title || data.title || "Facebook Video";
-                }
-            }
-
-            if (!fbvid && data.url) {
-                fbvid = data.url;
-                title = data.title || data.caption || "Facebook Video";
-            }
-
-            if (!fbvid && data.download) {
-                fbvid = data.download;
-                title = data.title || "Facebook Video";
-            }
-
-            if (!fbvid && data.video) {
-                if (typeof data.video === 'string') {
-                    fbvid = data.video;
-                } else if (data.video.url) {
-                    fbvid = data.video.url;
-                }
-                title = data.title || data.video.title || "Facebook Video";
+                } catch (_) {}
             }
         }
-    }
-}
 
         if (!fbvid) {
+            await sock.sendMessage(chatId, { react: { text: '❌', key: message.key } });
             return await sock.sendMessage(chatId, {
-                text: '❌ Failed to get video URL from Facebook.\n\nPossible reasons:\n• Video is private or deleted\n• Link is invalid\n• Video is not available for download\n\nPlease try a different Facebook video link.'
+                text: '❌ Failed to download video from Facebook.\n\nPossible reasons:\n• Video is private or deleted\n• Link is invalid\n\nPlease try a different Facebook video link.'
             }, { quoted: message });
         }
 
-        // Try URL method first (more reliable)
-        try {
-            const caption = title ? `𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗗 𝗕𝗬 𝗠𝗔𝗭𝗔𝗥𝗜 𝗕𝗢𝗧\n\n📝 Title: ${title}` : "𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗗 𝗕𝗬 𝗠𝗔𝗭𝗔𝗥𝗜 𝗕𝗢𝗧";
+        const caption = `🎬 *${title}*\n\n⚡ *Downloaded by ZoxerBot*`;
+        await sock.sendMessage(chatId, {
+            video: { url: fbvid },
+            mimetype: 'video/mp4',
+            caption: caption,
+            ...global.channelInfo
+        }, { quoted: message });
 
-            await sock.sendMessage(chatId, {
-                video: { url: fbvid },
-                mimetype: "video/mp4",
-                caption: caption,
-                ...global.channelInfo
-            }, { quoted: message });
-
-            return;
-        } catch (urlError) {
-            console.error(`URL method failed: ${urlError.message}`);
-
-            // Fallback to buffer method
-            try {
-                // Create temp directory if it doesn't exist
-                const tmpDir = path.join(process.cwd(), 'tmp');
-                if (!fs.existsSync(tmpDir)) {
-                    fs.mkdirSync(tmpDir, { recursive: true });
-                }
-
-                // Generate temp file path
-                const tempFile = path.join(tmpDir, `fb_${Date.now()}.mp4`);
-
-                // Download the video
-                const videoResponse = await axios({
-                    method: 'GET',
-                    url: fbvid,
-                    responseType: 'stream',
-                    timeout: 60000,
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        'Accept': 'video/mp4,video/*;q=0.9,*/*;q=0.8',
-                        'Accept-Language': 'en-US,en;q=0.5',
-                        'Referer': 'https://www.facebook.com/'
-                    }
-                });
-
-                const writer = fs.createWriteStream(tempFile);
-                videoResponse.data.pipe(writer);
-
-                await new Promise((resolve, reject) => {
-                    writer.on('finish', resolve);
-                    writer.on('error', reject);
-                });
-
-                // Check if file was downloaded successfully
-                if (!fs.existsSync(tempFile) || fs.statSync(tempFile).size === 0) {
-                    throw new Error('Failed to download video');
-                }
-
-                // Send the video
-                const caption = title ? `𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗗 𝗕𝗬 𝗠𝗔𝗭𝗔𝗥𝗜 𝗕𝗢𝗧\n\n📝 Title: ${title}` : "𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗𝗘𝗗 𝗕𝗬 𝗠𝗔𝗭𝗔𝗥𝗜 𝗕𝗢𝗧";
-            
-                await sock.sendMessage(chatId, {
-                    video: { url: tempFile },
-                    mimetype: "video/mp4",
-                    caption: caption,
-                    ...global.channelInfo
-                }, { quoted: message });
-
-                // Clean up temp file
-                try {
-                    fs.unlinkSync(tempFile);
-                } catch (err) {
-                    console.error('Error cleaning up temp file:', err);
-                }
-                return;
-            } catch (bufferError) {
-                console.error(`Buffer method also failed: ${bufferError.message}`);
-                throw new Error('Both URL and buffer methods failed');
-            }
-        }
+        await sock.sendMessage(chatId, { react: { text: '✅', key: message.key } });
 
     } catch (error) {
         console.error('Error in Facebook command:', error);
+        await sock.sendMessage(chatId, { react: { text: '❌', key: message.key } });
         await sock.sendMessage(chatId, {
-            text: "An error occurred. API might be down. Error: " + error.message
+            text: "❌ An error occurred while downloading the Facebook video."
         }, { quoted: message });
     }
 }
 
-module.exports = facebookCommand; 
+module.exports = facebookCommand;
