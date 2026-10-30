@@ -21,6 +21,7 @@ tmp/
 *.zip
 *.bin
 *.log
+assets/musics/
 
 # OS specific files
 .DS_Store
