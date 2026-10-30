@@ -135,7 +135,15 @@ const commandCatalog = {
     'autoread': { category: 'Owner Control', desc: 'Toggle auto blue tick receipts.', usage: '.autoread on / off' },
     'anticall': { category: 'Owner Control', desc: 'Toggle auto reject voice and video calls.', usage: '.anticall on / off' },
     'pmblocker': { category: 'Owner Control', desc: 'Block incoming private DMs.', usage: '.pmblocker on / off' },
-    'smartreply': { category: 'Owner Control', desc: 'Toggle automatic greeting responses.', usage: '.smartreply on / off' }
+    'smartreply': { category: 'Owner Control', desc: 'Toggle automatic greeting responses.', usage: '.smartreply on / off' },
+    'waifu': { category: 'Anime & Manga', desc: 'Fetch a random high quality anime waifu image.', usage: '.waifu' },
+    'neko': { category: 'Anime & Manga', desc: 'Fetch a cute catgirl anime picture.', usage: '.neko' },
+    'kitsune': { category: 'Anime & Manga', desc: 'Fetch a foxgirl anime picture.', usage: '.kitsune' },
+    'husbando': { category: 'Anime & Manga', desc: 'Fetch an anime husbando picture.', usage: '.husbando' },
+    'wallpaper': { category: 'Anime & Manga', desc: 'Fetch high quality anime wallpaper.', usage: '.wallpaper' },
+    'anime': { category: 'Anime & Manga', desc: 'Send anime reaction GIF with mentions.', usage: '.anime <reaction> or .hug @user' },
+    'animequote': { category: 'Anime & Manga', desc: 'Fetch inspirational anime quotes.', usage: '.animequote' },
+    'whatanime': { category: 'Anime & Manga', desc: 'Identify anime title and episode from replied screenshot.', usage: '.whatanime (reply to image)' }
 };
 
 async function helpCommand(sock, chatId, message, customChannelLink) {

@@ -283,7 +283,7 @@ const imagineCommand = require('./commands/imagine');
 const sudoCommand = require('./commands/sudo');
 const { miscCommand, handleHeart } = require('./commands/misc');
 const { animeCommand } = require('./commands/anime');
-const { animePicsCommand, animeQuoteCommand } = require('./commands/animepics');
+const { animePicsCommand, animeQuoteCommand, whatAnimeCommand } = require('./commands/animepics');
 const { piesCommand, piesAlias } = require('./commands/pies');
 const stickercropCommand = require('./commands/stickercrop');
 const updateCommand = require('./commands/update');
@@ -965,12 +965,16 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 }
                 await unbanCommand(sock, chatId, message);
                 break;
-            case (['.waifu', '.neko', '.maid', '.uniform', '.husbando', '.kitsune', '.shinobu', '.megumin'].includes(userMessage)): {
-                const type = userMessage.slice(1).toLowerCase();
+            case (['.waifu', '.neko', '.maid', '.uniform', '.husbando', '.kitsune', '.shinobu', '.megumin', '.wallpaper', '.animewallpaper', '.foxgirl'].some(cmd => userMessage === cmd || userMessage.startsWith(cmd + ' '))): {
+                const type = userMessage.slice(1).split(/\s+/)[0].toLowerCase();
                 await animePicsCommand(sock, chatId, message, type);
                 commandExecuted = true;
                 break;
             }
+            case userMessage.startsWith('.whatanime') || userMessage.startsWith('.findanime') || userMessage.startsWith('.trace'):
+                await whatAnimeCommand(sock, chatId, message);
+                commandExecuted = true;
+                break;
             case userMessage === '.animequote':
                 await animeQuoteCommand(sock, chatId, message);
                 commandExecuted = true;
@@ -1753,7 +1757,7 @@ async function handleMessages(sock, messageUpdate, printLog) {
                     await miscCommand(sock, chatId, message, args);
                 }
                 break;
-            case userMessage.startsWith('.animu'):
+            case userMessage.startsWith('.animu') || userMessage.startsWith('.anime'):
                 {
                     const parts = userMessage.trim().split(/\s+/);
                     const args = parts.slice(1);
@@ -1768,6 +1772,15 @@ async function handleMessages(sock, messageUpdate, printLog) {
             case userMessage.startsWith('.pat'):
             case userMessage.startsWith('.hug'):
             case userMessage.startsWith('.wink'):
+            case userMessage.startsWith('.slap'):
+            case userMessage.startsWith('.smug'):
+            case userMessage.startsWith('.blush'):
+            case userMessage.startsWith('.dance'):
+            case userMessage.startsWith('.cuddle'):
+            case userMessage.startsWith('.bonk'):
+            case userMessage.startsWith('.yeet'):
+            case userMessage.startsWith('.bite'):
+            case userMessage.startsWith('.feed'):
             case userMessage.startsWith('.facepalm'):
             case userMessage.startsWith('.face-palm'):
             case userMessage.startsWith('.animuquote'):
