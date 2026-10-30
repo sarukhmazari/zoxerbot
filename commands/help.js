@@ -369,9 +369,10 @@ async function helpCommand(sock, chatId, message, customChannelLink) {
 
         const candidatePaths = [
             path.resolve(__dirname, '..', 'assets', 'images', 'custom_menu.jpg'),
-            path.resolve(__dirname, '..', 'zoxer.jfif'),
-            path.resolve(__dirname, '..', 'assets', 'images', 'banner.png'),
-            path.resolve(__dirname, '..', 'assets', 'images', 'logo.png')
+            path.resolve(__dirname, '..', 'zoxer.jpg'),
+            path.resolve(process.cwd(), 'zoxer.jpg'),
+            path.resolve(__dirname, '..', 'assets', 'images', 'zoxer.jpg'),
+            path.resolve(process.cwd(), 'assets', 'images', 'zoxer.jpg')
         ];
         const customMenuPath = candidatePaths.find(filePath => fs.existsSync(filePath));
 

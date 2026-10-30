@@ -179,8 +179,8 @@ async function animePicsCommand(sock, chatId, message, type) {
 
         // Offline mode fallback
         const localCandidates = [
-            './assets/images/logo.png',
-            './zoxer.jfif'
+            './zoxer.jpg',
+            './assets/images/zoxer.jpg'
         ];
         const localPath = localCandidates.find(p => fs.existsSync(p));
         if (localPath) {

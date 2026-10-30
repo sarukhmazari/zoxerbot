@@ -15,7 +15,7 @@ const settings = {
   updateZipUrl: "",
   channelLink: "https://whatsapp.com/channel/0029VbBRITODzgTGQhZSFT3P",
   newsletterJid: "120363404139113188@newsletter",
-  connectionImagePath: process.env.CONNECTION_IMAGE_PATH || "./zoxer.jfif",
+  connectionImagePath: process.env.CONNECTION_IMAGE_PATH || "./zoxer.jpg",
   newsletters: [
     '120363404139113188@newsletter'
   ],

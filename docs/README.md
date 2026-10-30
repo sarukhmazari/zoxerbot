@@ -9,7 +9,7 @@ pinned: false
 ---
 
 <div align="center">
-  <img src="assets/images/banner.png" alt="ZOXER BOT Banner" width="100%">
+  <img src="assets/images/zoxer.jpg" alt="ZOXER BOT Banner" width="100%">
   
   # 〔 𝗭𝗢𝗫𝗘𝗥  𝗕𝗢𝗧 〕
   
