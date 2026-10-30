@@ -41,6 +41,7 @@
     "gtts": "^0.2.1",
     "human-readable": "^0.2.1",
     "jimp": "^1.6.0",
+    "jsqr": "^1.4.0",
     "libphonenumber-js": "^1.12.41",
     "link-preview-js": "^3.0.5",
     "moment-timezone": "^0.5.43",

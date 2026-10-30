@@ -307,6 +307,7 @@ const toAudioCommand = require('./commands/toaudio');
 const toVideoCommand = require('./commands/tovideo');
 const toPttCommand = require('./commands/toptt');
 const qrcodeCommand = require('./commands/qrcode');
+const scanqrCommand = require('./commands/scanqr');
 const { invertCommand, rotateCommand } = require('./commands/imageedit');
 const reactCommand = require('./commands/react');
 const { fancyCommand, readmoreCommand, morseCommand, countCommand, reverseCommand } = require('./commands/textutils');
@@ -1878,6 +1879,10 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 break;
             case userMessage === '.toptt' || userMessage === '.vn':
                 await toPttCommand(sock, chatId, message);
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.scanqr') || userMessage.startsWith('.readqr') || userMessage.startsWith('.qrscan') || userMessage.startsWith('.qrread'):
+                await scanqrCommand(sock, chatId, message, userMessage.split(/\s+/).slice(1));
                 commandExecuted = true;
                 break;
             case userMessage.startsWith('.qr') || userMessage.startsWith('.qrcode'):

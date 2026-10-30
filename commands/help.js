@@ -220,6 +220,7 @@ async function helpCommand(sock, chatId, message, customChannelLink) {
             `│  *.tovideo* 〔*.mp4*〕\n` +
             `│  *.toptt* 〔*.vn*〕\n` +
             `│  *.qr <text/url>* 〔*.qrcode*〕\n` +
+            `│  *.scanqr* 〔*.readqr*〕\n` +
             `│  *.blur*\n` +
             `│  *.remini* 〔*.enhance*, *.upscale*〕\n` +
             `│  *.removebg* 〔*.rmbg*, *.nobg*〕\n` +
