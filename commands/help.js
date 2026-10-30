@@ -367,8 +367,8 @@ async function helpCommand(sock, chatId, message, customChannelLink) {
             `╰──────────────`;
 
         const candidatePaths = [
-            path.resolve(__dirname, '..', 'zoxer.jfif'),
             path.resolve(__dirname, '..', 'assets', 'images', 'custom_menu.jpg'),
+            path.resolve(__dirname, '..', 'zoxer.jfif'),
             path.resolve(__dirname, '..', 'assets', 'images', 'banner.png'),
             path.resolve(__dirname, '..', 'assets', 'images', 'logo.png')
         ];
