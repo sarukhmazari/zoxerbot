@@ -1,7 +1,9 @@
+const fs = require('fs');
+const path = require('path');
 const axios = require('axios');
 const yts = require('yt-search');
 const btch = require('btch-downloader');
-const rahad = require('rahad-all-downloader-v2');
+const { downloadMp4, getYtDlpMeta, getCookiesPath, tmpDir } = require('../lib/ytdlp-helper');
 
 let settings = null;
 try {
@@ -15,6 +17,22 @@ function extractYouTubeId(input) {
     if (!input || typeof input !== 'string') return null;
     const match = input.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?.*?v=|shorts\/|embed\/|v\/))([a-zA-Z0-9_-]{11})/i);
     return match ? match[1] : null;
+}
+
+function getBotChallengeMessage() {
+    const hasCookies = !!getCookiesPath();
+    let msg = '⚠️ *YouTube Bot Challenge (Server IP Blocked)*\n\n';
+    if (hasCookies) {
+        msg += 'Your `cookies.txt` on the server has expired or is invalid.\n\n';
+    } else {
+        msg += 'YouTube blocks automated video streams from cloud VPS servers (AWS Lightsail) without cookies.\n\n';
+    }
+    msg += '*How to enable HD video downloads in 1 minute:*\n';
+    msg += '1. In Chrome/Edge/Firefox, install *"Get cookies.txt LOCALLY"* extension.\n';
+    msg += '2. Open YouTube while logged into Google, click the extension, and export `cookies.txt`.\n';
+    msg += '3. Send the `cookies.txt` document to this bot in WhatsApp with the caption *.setcookies*!\n\n';
+    msg += '⚡ The bot will immediately activate full HD music and video downloads.';
+    return msg;
 }
 
 async function resolveVideo(input) {
@@ -65,44 +83,16 @@ async function resolveVideo(input) {
             };
         }
     } catch (cfErr) {
-        console.warn('[VIDEO] Cloudflare Worker failed, trying BTCH fallback:', cfErr.response?.data?.error?.message || cfErr.message);
+        console.warn('[VIDEO] Cloudflare Worker failed, trying next method:', cfErr.response?.data?.error?.message || cfErr.message);
     }
 
-    // 2. BTCH Downloader Fallback
-    try {
-        const bRes = await btch.youtube(targetUrl);
-        const dl = bRes.mp4 || bRes.mp3;
-        if (dl) {
-            return {
-                downloadUrl: dl,
-                title: bRes.title || title,
-                author: bRes.author || author,
-                thumbnail: bRes.thumbnail || thumbnail,
-                targetUrl
-            };
-        }
-    } catch (bErr) {
-        console.warn('[VIDEO] BTCH fallback failed, trying Rahad fallback:', bErr.message);
-    }
-
-    // 3. Rahad All Downloader Fallback
-    try {
-        const rRes = await rahad.alldl(targetUrl);
-        const dl = rRes.data?.download?.video || rRes.data?.download?.audio;
-        if (dl) {
-            return {
-                downloadUrl: dl,
-                title: rRes.data?.title || title,
-                author: author,
-                thumbnail: thumbnail,
-                targetUrl
-            };
-        }
-    } catch (rErr) {
-        console.warn('[VIDEO] Rahad fallback failed:', rErr.message);
-    }
-
-    throw new Error('Video extraction failed. Please retry in a few moments.');
+    return {
+        downloadUrl: null,
+        title,
+        author,
+        thumbnail,
+        targetUrl
+    };
 }
 
 async function videoCommand(sock, chatId, message, queryText = '') {
@@ -123,6 +113,9 @@ async function videoCommand(sock, chatId, message, queryText = '') {
 
     await sock.sendMessage(chatId, { react: { text: '⏳', key: message.key } });
 
+    let downloadedFilePath = null;
+    const fileId = `video_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+
     try {
         const media = await resolveVideo(text);
         const videoTitle = media.title;
@@ -130,22 +123,30 @@ async function videoCommand(sock, chatId, message, queryText = '') {
         const safeFileName = `${(videoTitle || 'video').replace(/[\\/:*?"<>|]/g, '_')}.mp4`;
         const caption = `🎬 *${videoTitle}*\n📺 *Channel:* ${channel}\n\n⚡ *Downloaded by ZoxerBot*`;
 
-        try {
-            await sock.sendMessage(chatId, {
-                video: { url: media.downloadUrl },
-                mimetype: 'video/mp4',
-                fileName: safeFileName,
-                caption: caption
-            }, { quoted: message });
-        } catch (streamErr) {
-            const bufferRes = await axios.get(media.downloadUrl, {
-                responseType: 'arraybuffer',
-                timeout: 90000,
-                headers: { 'User-Agent': 'Mozilla/5.0' }
-            });
+        let sent = false;
+
+        // Try direct stream if Cloudflare Worker provided a valid non-restricted link
+        if (media.downloadUrl) {
+            try {
+                await sock.sendMessage(chatId, {
+                    video: { url: media.downloadUrl },
+                    mimetype: 'video/mp4',
+                    fileName: safeFileName,
+                    caption: caption
+                }, { quoted: message });
+                sent = true;
+            } catch (streamErr) {
+                console.warn('[VIDEO] Direct stream failed, falling back to local downloader:', streamErr.message);
+            }
+        }
+
+        // Use local yt-dlp downloader with cookie support
+        if (!sent) {
+            downloadedFilePath = await downloadMp4(media.targetUrl, fileId);
+            const videoBuffer = fs.readFileSync(downloadedFilePath);
 
             await sock.sendMessage(chatId, {
-                video: Buffer.from(bufferRes.data),
+                video: videoBuffer,
                 mimetype: 'video/mp4',
                 fileName: safeFileName,
                 caption: caption
@@ -157,9 +158,21 @@ async function videoCommand(sock, chatId, message, queryText = '') {
     } catch (err) {
         console.error('[VIDEO ERROR]:', err.message);
         await sock.sendMessage(chatId, { react: { text: '❌', key: message.key } });
-        await sock.sendMessage(chatId, {
-            text: `❌ *Video Download Failed*\n\n*Error:* ${err.response?.data?.error?.message || err.message}`
-        }, { quoted: message });
+
+        const is403 = /status code 403/i.test(err.message) || /Forbidden/i.test(err.message);
+        if (err.isBotBlocked || is403) {
+            await sock.sendMessage(chatId, {
+                text: getBotChallengeMessage()
+            }, { quoted: message });
+        } else {
+            await sock.sendMessage(chatId, {
+                text: `❌ *Video Download Failed*\n\n*Error:* ${err.message || 'Unable to download video'}\n\nPlease verify the video link or try another search!`
+            }, { quoted: message });
+        }
+    } finally {
+        if (downloadedFilePath && fs.existsSync(downloadedFilePath)) {
+            try { fs.unlinkSync(downloadedFilePath); } catch (_) {}
+        }
     }
 }
 
