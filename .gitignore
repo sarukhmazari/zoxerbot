@@ -23,6 +23,8 @@ tmp/
 *.log
 assets/musics/
 assets/images/custom_menu.jpg
+cookies.txt
+cookies/
 
 # OS specific files
 .DS_Store
