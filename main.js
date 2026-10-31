@@ -1604,14 +1604,14 @@ async function handleMessages(sock, messageUpdate, printLog) {
             case userMessage.startsWith('.tiktok') || userMessage.startsWith('.tt'):
                 await tiktokCommand(sock, chatId, message);
                 break;
-            case userMessage.startsWith('.song') || userMessage.startsWith('.play') || userMessage.startsWith('.mp3 '):
-                await songCommand(sock, chatId, message);
+            case userMessage.startsWith('.song') || userMessage.startsWith('.play') || userMessage.startsWith('.mp3 ') || userMessage === '.mp3':
+                await songCommand(sock, chatId, message, rawText);
                 break;
             case userMessage.startsWith('.spotify') || userMessage.startsWith('.sp ') || userMessage === '.sp':
                 await spotifyCommand(sock, chatId, message);
                 break;
             case userMessage.startsWith('.video') || userMessage.startsWith('.ytmp4') || userMessage.startsWith('.ytvideo'):
-                await videoCommand(sock, chatId, message);
+                await videoCommand(sock, chatId, message, rawText);
                 break;
             case userMessage.startsWith('.cookies') || userMessage.startsWith('.setcookies'):
                 await cookiesCommand(sock, chatId, message);

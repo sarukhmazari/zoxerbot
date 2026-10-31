@@ -1,145 +1,113 @@
-const path = require('path');
-const fs = require('fs');
 const axios = require('axios');
-const { getYtDlpMeta, downloadMp4 } = require('../lib/ytdlp-helper');
-const { fetchMediaFromApi } = require('../lib/mediaApi');
+const yts = require('yt-search');
+
+let settings = null;
+try {
+    settings = require('../settings');
+} catch (_) {}
+
+const API_BASE = (settings && settings.zoxerMediaApiUrl) || process.env.ZOXER_MEDIA_API_URL || 'https://zoxer-media-api.sarukhmazari1.workers.dev';
+const API_KEY = (settings && settings.zoxerMediaApiKey) || process.env.ZOXER_MEDIA_API_KEY || 'zoxer_e4b5054d63fc1ed506cdafc9be5c858410b5f17e97a8a5da';
 
 async function videoCommand(sock, chatId, message, queryText = '') {
-    const text = queryText || (
+    const rawInput = queryText || (
         message.message?.conversation ||
         message.message?.extendedTextMessage?.text ||
+        message.message?.imageMessage?.caption ||
+        message.message?.videoMessage?.caption ||
         ''
-    ).replace(/^\.(video|ytmp4|ytvideo)\s*/i, '').trim();
+    );
+    const text = rawInput.replace(/^\.(video|ytmp4|ytvideo)\s*/i, '').trim();
 
     if (!text) {
         return await sock.sendMessage(chatId, {
-            text: '🎬 *Please provide a video name or YouTube link!*\n\n*Usage:* `.video <video name>`\n*Example:* `.video Believer Imagine Dragons`\n*Or direct link:* `.video https://youtu.be/...`'
+            text: '🎬 *Please provide a video name or YouTube link!*\n\n*Usage:* `.video <video name>`\n*Example:* `.video Believer Imagine Dragons`\n*Direct link:* `.video https://youtu.be/...`'
         }, { quoted: message });
     }
 
-    await sock.sendMessage(chatId, { react: { text: '🔄', key: message.key } });
-    await sock.sendMessage(chatId, {
-        text: `⏳ *Searching & downloading video:* "${text}"...`
-    }, { quoted: message });
-
-    const isYoutubeUrl = /(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?|shorts\/|v\/|embed\/)|youtu\.be\/)/i.test(text);
-
-    // 1. Direct YouTube URL: Call private Cloudflare Workers Media API
-    if (isYoutubeUrl) {
-        try {
-            const media = await fetchMediaFromApi(text, 'video');
-            const videoTitle = media.title || 'YouTube Video';
-            const channel = media.author || 'YouTube';
-            const caption = `🎬 *${videoTitle}*\n📺 *Channel:* ${channel}\n\n⚡ *Downloaded by ZoxerBot*`;
-
-            try {
-                await sock.sendMessage(chatId, {
-                    video: { url: media.downloadUrl },
-                    mimetype: 'video/mp4',
-                    fileName: `${videoTitle.replace(/[\\/:*?"<>|]/g, '_')}.mp4`,
-                    caption: caption
-                }, { quoted: message });
-            } catch (streamErr) {
-                console.warn('[VIDEO] Direct stream failed, downloading buffer:', streamErr.message);
-                const res = await axios.get(media.downloadUrl, {
-                    responseType: 'arraybuffer',
-                    timeout: 60000,
-                    headers: { 'User-Agent': 'Mozilla/5.0' }
-                });
-                await sock.sendMessage(chatId, {
-                    video: Buffer.from(res.data),
-                    mimetype: 'video/mp4',
-                    fileName: `${videoTitle.replace(/[\\/:*?"<>|]/g, '_')}.mp4`,
-                    caption: caption
-                }, { quoted: message });
-            }
-
-            await sock.sendMessage(chatId, { react: { text: '✅', key: message.key } });
-            return;
-        } catch (apiErr) {
-            console.warn('[VIDEO] Private API failed for direct URL, falling back to yt-dlp:', apiErr.message);
-        }
-    }
-
-    // 2. Query search or fallback to yt-dlp
-    const fileId = `video_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-    let downloadedFilePath = null;
+    await sock.sendMessage(chatId, { react: { text: '⏳', key: message.key } });
 
     try {
-        let meta = null;
-        try {
-            meta = await getYtDlpMeta(text);
-        } catch (mErr) {
-            if (mErr.isBotBlocked) throw mErr;
+        let targetUrl = text;
+        let title = text;
+        let author = 'YouTube';
+
+        const isUrl = /(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?|shorts\/|v\/|embed\/)|youtu\.be\/)/i.test(text);
+
+        // 1. Resolve query via yt-search if not already a link
+        if (!isUrl) {
+            const search = await yts(text);
+            const video = search?.videos?.[0];
+            if (!video) throw new Error('No video found for this search.');
+            targetUrl = video.url;
+            title = video.title;
+            author = video.author?.name || 'YouTube';
         }
 
-        // Try Private Media API if meta returned a YouTube URL
-        if (meta?.url) {
+        // 2. Request direct download URL from Cloudflare Worker (with automatic retry)
+        let res;
+        for (let attempt = 1; attempt <= 2; attempt++) {
             try {
-                const media = await fetchMediaFromApi(meta.url, 'video');
-                const videoTitle = media.title || meta.title || text;
-                const videoUploader = media.author || meta.uploader || 'YouTube';
-                const videoDuration = meta?.duration ? ` • ⏱️ ${meta.duration}` : '';
-                const caption = `🎬 *${videoTitle}*\n📺 *Channel:* ${videoUploader}${videoDuration}\n\n⚡ *Downloaded by ZoxerBot*`;
-
-                try {
-                    await sock.sendMessage(chatId, {
-                        video: { url: media.downloadUrl },
-                        mimetype: 'video/mp4',
-                        fileName: `${videoTitle.replace(/[\\/:*?"<>|]/g, '_')}.mp4`,
-                        caption: caption
-                    }, { quoted: message });
-                } catch (streamErr) {
-                    const res = await axios.get(media.downloadUrl, {
-                        responseType: 'arraybuffer',
-                        timeout: 60000,
-                        headers: { 'User-Agent': 'Mozilla/5.0' }
-                    });
-                    await sock.sendMessage(chatId, {
-                        video: Buffer.from(res.data),
-                        mimetype: 'video/mp4',
-                        fileName: `${videoTitle.replace(/[\\/:*?"<>|]/g, '_')}.mp4`,
-                        caption: caption
-                    }, { quoted: message });
+                res = await axios.post(`${API_BASE}/api/v1/download`, {
+                    url: targetUrl,
+                    format: 'video'
+                }, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${API_KEY}`
+                    },
+                    timeout: 35000
+                });
+                if (res.data?.success && res.data?.data?.media?.download_url) {
+                    break;
                 }
-
-                await sock.sendMessage(chatId, { react: { text: '✅', key: message.key } });
-                return;
-            } catch (queryApiErr) {
-                console.warn('[VIDEO] Private API query resolution failed, using yt-dlp local downloader:', queryApiErr.message);
+            } catch (postErr) {
+                if (attempt === 2) throw postErr;
+                await new Promise(r => setTimeout(r, 1200));
             }
         }
 
-        const target = meta?.url || text;
-        downloadedFilePath = await downloadMp4(target, fileId);
+        const downloadUrl = res?.data?.data?.media?.download_url;
+        if (!res?.data?.success || !downloadUrl) {
+            throw new Error(res?.data?.error?.message || 'Media extraction failed.');
+        }
 
-        const videoTitle = meta?.title || text;
-        const videoUploader = meta?.uploader || 'YouTube';
-        const videoDuration = meta?.duration ? ` • ⏱️ ${meta.duration}` : '';
+        const videoTitle = res.data.data.title || title;
+        const channel = res.data.data.author?.name || author;
+        const safeFileName = `${(videoTitle || 'video').replace(/[\\/:*?"<>|]/g, '_')}.mp4`;
+        const caption = `🎬 *${videoTitle}*\n📺 *Channel:* ${channel}\n\n⚡ *Downloaded by ZoxerBot*`;
 
-        const videoBuffer = fs.readFileSync(downloadedFilePath);
+        // 3. Send video to WhatsApp
+        try {
+            await sock.sendMessage(chatId, {
+                video: { url: downloadUrl },
+                mimetype: 'video/mp4',
+                fileName: safeFileName,
+                caption: caption
+            }, { quoted: message });
+        } catch (streamErr) {
+            const bufferRes = await axios.get(downloadUrl, {
+                responseType: 'arraybuffer',
+                timeout: 90000,
+                headers: { 'User-Agent': 'Mozilla/5.0' }
+            });
 
-        await sock.sendMessage(chatId, {
-            video: videoBuffer,
-            mimetype: 'video/mp4',
-            fileName: `${videoTitle.replace(/[\\/:*?"<>|]/g, '_')}.mp4`,
-            caption: `🎬 *${videoTitle}*\n📺 *Channel:* ${videoUploader}${videoDuration}\n\n⚡ *Downloaded by ZoxerBot*`
-        }, { quoted: message });
+            await sock.sendMessage(chatId, {
+                video: Buffer.from(bufferRes.data),
+                mimetype: 'video/mp4',
+                fileName: safeFileName,
+                caption: caption
+            }, { quoted: message });
+        }
 
         await sock.sendMessage(chatId, { react: { text: '✅', key: message.key } });
 
     } catch (err) {
-        console.error('[VIDEO] Error in videoCommand:', err.message || err);
+        console.error('[VIDEO ERROR]:', err.message);
         await sock.sendMessage(chatId, { react: { text: '❌', key: message.key } });
         await sock.sendMessage(chatId, {
-            text: err.isBotBlocked
-                ? err.message
-                : `❌ *Failed to download video.*\n\n*Error:* ${err.message || 'Video could not be downloaded.'}`
+            text: `❌ *Video Download Failed*\n\n*Error:* ${err.response?.data?.error?.message || err.message}`
         }, { quoted: message });
-    } finally {
-        if (downloadedFilePath && fs.existsSync(downloadedFilePath)) {
-            try { fs.unlinkSync(downloadedFilePath); } catch (_) {}
-        }
     }
 }
 
