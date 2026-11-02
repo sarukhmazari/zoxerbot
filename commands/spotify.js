@@ -183,22 +183,51 @@ async function spotifyCommand(sock, chatId, message, queryText = '') {
         const title = media.title || 'Spotify Track';
         const author = media.author || 'Spotify Artist';
         const cover = media.thumbnail || 'https://open.spotify.com/favicon.ico';
-        const safeName = `${title.replace(/[\\/:*?"<>|]/g, '_')}.mp3`;
-
         let audioContent = null;
+        let finalTitle = title;
+        let finalAuthor = author;
+        let finalCover = cover;
+
         if (media.isLocalFile && media.filePath) {
             tempLocalFile = media.filePath;
             audioContent = fs.readFileSync(media.filePath);
         } else if (media.download_url) {
-            const audioRes = await axios.get(media.download_url, {
-                responseType: 'arraybuffer',
-                timeout: 60000,
-                headers: AUTH_HEADERS
-            });
-            audioContent = Buffer.from(audioRes.data);
-        } else {
-            throw new Error('No valid audio stream received.');
+            try {
+                const audioRes = await axios.get(media.download_url, {
+                    responseType: 'arraybuffer',
+                    timeout: 45000,
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    }
+                });
+                audioContent = Buffer.from(audioRes.data);
+            } catch (dlErr) {
+                console.warn('[SPOTIFY] Direct stream URL download failed (' + dlErr.message + '), executing local yt-dlp fallback...');
+                const fb = await fallbackSpotifyResolve(raw);
+                if (fb && fb.filePath) {
+                    tempLocalFile = fb.filePath;
+                    audioContent = fs.readFileSync(fb.filePath);
+                    if (!media.title || media.title === 'Spotify Track') finalTitle = fb.title;
+                    if (!media.author || media.author === 'Spotify Artist') finalAuthor = fb.author;
+                    if (!media.thumbnail) finalCover = fb.thumbnail;
+                }
+            }
         }
+
+        if (!audioContent) {
+            const fb = await fallbackSpotifyResolve(raw);
+            if (fb && fb.filePath) {
+                tempLocalFile = fb.filePath;
+                audioContent = fs.readFileSync(fb.filePath);
+                finalTitle = fb.title;
+                finalAuthor = fb.author;
+                finalCover = fb.thumbnail;
+            } else {
+                throw new Error('Unable to extract audio bytes from any stream source.');
+            }
+        }
+
+        const safeName = `${finalTitle.replace(/[\\/:*?"<>|]/g, '_')}.mp3`;
 
         await sock.sendMessage(chatId, {
             audio: audioContent,

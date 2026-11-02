@@ -190,22 +190,51 @@ async function slowedCommand(sock, chatId, message, queryText = '') {
         const title = media.title || `${raw} (Slowed + Reverb)`;
         const author = media.author || 'Artist';
         const cover = media.thumbnail || 'https://i.ibb.co/vzr5K2W/music.png';
-        const safeName = `${title.replace(/[\\/:*?"<>|]/g, '_')}.mp3`;
-
         let audioContent = null;
+        let finalTitle = title;
+        let finalAuthor = author;
+        let finalCover = cover;
+
         if (media.isLocalFile && media.filePath) {
             tempLocalFile = media.filePath;
             audioContent = fs.readFileSync(media.filePath);
         } else if (media.download_url) {
-            const audioRes = await axios.get(media.download_url, {
-                responseType: 'arraybuffer',
-                timeout: 60000,
-                headers: AUTH_HEADERS
-            });
-            audioContent = Buffer.from(audioRes.data);
-        } else {
-            throw new Error('No valid slowed audio received.');
+            try {
+                const audioRes = await axios.get(media.download_url, {
+                    responseType: 'arraybuffer',
+                    timeout: 45000,
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    }
+                });
+                audioContent = Buffer.from(audioRes.data);
+            } catch (dlErr) {
+                console.warn('[SLOWED] Direct stream URL download failed (' + dlErr.message + '), executing local FFmpeg fallback...');
+                const fb = await fallbackSlowedResolve(raw);
+                if (fb && fb.filePath) {
+                    tempLocalFile = fb.filePath;
+                    audioContent = fs.readFileSync(fb.filePath);
+                    if (fb.title) finalTitle = fb.title;
+                    if (fb.author) finalAuthor = fb.author;
+                    if (fb.thumbnail) finalCover = fb.thumbnail;
+                }
+            }
         }
+
+        if (!audioContent) {
+            const fb = await fallbackSlowedResolve(raw);
+            if (fb && fb.filePath) {
+                tempLocalFile = fb.filePath;
+                audioContent = fs.readFileSync(fb.filePath);
+                if (fb.title) finalTitle = fb.title;
+                if (fb.author) finalAuthor = fb.author;
+                if (fb.thumbnail) finalCover = fb.thumbnail;
+            } else {
+                throw new Error('Unable to generate slowed audio bytes from any stream source.');
+            }
+        }
+
+        const safeName = `${finalTitle.replace(/[\\/:*?"<>|]/g, '_')}.mp3`;
 
         await sock.sendMessage(chatId, {
             audio: audioContent,
