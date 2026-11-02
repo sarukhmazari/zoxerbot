@@ -261,12 +261,13 @@ const facebookCommand = require('./commands/facebook');
 const tiktokCommand = require('./commands/tiktok');
 const songCommand = require('./commands/song');
 const spotifyCommand = require('./commands/spotify');
+const slowedCommand = require('./commands/slowed');
 const videoCommand = require('./commands/video');
 const cookiesCommand = require('./commands/cookies');
 const { antistickerCommand, handleStickerDetection } = require('./commands/antisticker');
 const { antibotCommand, handleBotDetection } = require('./commands/antibot');
 const { antiviewonceCommand, handleViewOnceDetection, findViewOnceMedia } = require('./commands/antiviewonce');
-const { afkCommand, handleAfkReturn, handleAfkMentions } = require('./commands/afk');
+const { afkCommand, unafkCommand, handleAfkReturn, handleAfkMentions } = require('./commands/afk');
 const aiCommand = require('./commands/ai');
 const urlCommand = require('./commands/url');
 const qcCommand = require('./commands/qc');
@@ -780,10 +781,15 @@ async function handleMessages(sock, messageUpdate, printLog) {
         }
 
         // AFK handlers (return from AFK & mention alerts)
+        const effectiveSender = (message.key.fromMe && sock?.user?.id)
+            ? (sock.user.id.split(':')[0] + '@s.whatsapp.net')
+            : senderId;
+
+        const isAfkCmd = userMessage.startsWith('.afk') || userMessage.startsWith('.unafk') || userMessage.startsWith('.afkoff');
+        if (!isAfkCmd) {
+            await handleAfkReturn(sock, chatId, message, effectiveSender);
+        }
         if (!message.key.fromMe) {
-            if (!userMessage.startsWith('.afk')) {
-                await handleAfkReturn(sock, chatId, message, senderId);
-            }
             await handleAfkMentions(sock, chatId, message);
         }
 
@@ -1610,6 +1616,9 @@ async function handleMessages(sock, messageUpdate, printLog) {
             case userMessage.startsWith('.spotify') || userMessage.startsWith('.sp ') || userMessage === '.sp':
                 await spotifyCommand(sock, chatId, message);
                 break;
+            case userMessage.startsWith('.slowed') || userMessage.startsWith('.slow ') || userMessage === '.slow':
+                await slowedCommand(sock, chatId, message, rawText);
+                break;
             case userMessage.startsWith('.video') || userMessage.startsWith('.ytmp4') || userMessage.startsWith('.ytvideo'):
                 await videoCommand(sock, chatId, message, rawText);
                 break;
@@ -1628,9 +1637,13 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 const avoArgs = userMessage.replace(/^\.(antiviewonce|antivo)\s*/i, '').trim().split(/\s+/).filter(Boolean);
                 await antiviewonceCommand(sock, chatId, senderId, avoArgs, message);
                 break;
-            case userMessage.startsWith('.afk'):
-                const afkArgs = userMessage.slice(4).trim().split(/\s+/).filter(Boolean);
-                await afkCommand(sock, chatId, senderId, message, afkArgs);
+            case userMessage.startsWith('.afk') || userMessage.startsWith('.unafk') || userMessage.startsWith('.afkoff'):
+                if (userMessage.startsWith('.unafk') || userMessage.startsWith('.afkoff')) {
+                    await unafkCommand(sock, chatId, senderId, message);
+                } else {
+                    const afkArgs = userMessage.slice(4).trim().split(/\s+/).filter(Boolean);
+                    await afkCommand(sock, chatId, senderId, message, afkArgs);
+                }
                 break;
             case userMessage.startsWith('.gpt') || userMessage.startsWith('.gemini'):
                 await aiCommand(sock, chatId, message);
