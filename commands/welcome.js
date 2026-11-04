@@ -37,6 +37,13 @@ async function handleJoinEvent(sock, id, participants) {
         try {
             // Handle case where participant might be an object or not a string
             const participantString = typeof participant === 'string' ? participant : (participant.id || participant.toString());
+            
+            // Skip welcome message if participant was kicked by Anti-Foreign filter
+            try {
+                const { wasKickedByAntiforeign } = require('./antiforeign');
+                if (wasKickedByAntiforeign(participantString)) continue;
+            } catch (_) {}
+
             const user = participantString.split('@')[0];
             
             // Get user's display name

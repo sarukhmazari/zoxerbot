@@ -48,6 +48,7 @@ async function settingsCommand(sock, chatId, message) {
         const goodbyeOn = groupId ? Boolean(userGroupData.goodbye && userGroupData.goodbye[groupId]) : false;
         const chatbotOn = groupId ? Boolean(userGroupData.chatbot && userGroupData.chatbot[groupId]) : false;
         const antitagCfg = groupId ? (userGroupData.antitag && userGroupData.antitag[groupId]) : null;
+        const antiforeignCfg = groupId ? (userGroupData.antiforeign && userGroupData.antiforeign[groupId]) : null;
 
         const lines = [];
         lines.push('╭─ *⚙️ 𝗭𝗢𝗫𝗘𝗥 𝗦𝗘𝗧𝗧𝗜𝗡𝗚𝗦*');
@@ -83,6 +84,13 @@ async function settingsCommand(sock, chatId, message) {
                 lines.push(`┃  ◈ *Antitag:* ON (${antitagCfg.action || 'delete'})`);
             } else {
                 lines.push('┃  ◈ *Antitag:* OFF');
+            }
+            if (antiforeignCfg && antiforeignCfg.enabled) {
+                const fMode = (antiforeignCfg.mode || 'allow').toUpperCase();
+                const fCodes = fMode === 'ALLOW' ? (antiforeignCfg.allowed || ['92']).join(',') : (antiforeignCfg.blocked || []).join(',');
+                lines.push(`┃  ◈ *Antiforeign:* ON (${fMode}: +${fCodes})`);
+            } else {
+                lines.push('┃  ◈ *Antiforeign:* OFF');
             }
         }
         lines.push('┃');

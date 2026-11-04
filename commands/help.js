@@ -120,6 +120,7 @@ const commandCatalog = {
     'antispam': { category: 'Group Management', desc: 'Repetition kick detector.', usage: '.antispam on / off' },
     'antisticker': { category: 'Group Management', desc: 'Auto delete stickers sent by non-admins.', usage: '.antisticker on / warn / kick / off' },
     'antibot': { category: 'Group Management', desc: 'Auto detect and kick rival bots from groups.', usage: '.antibot on / delete / off' },
+    'antiforeign': { category: 'Group Management', desc: 'Kick foreign/unauthorized country code numbers.', usage: '.antiforeign on / off / set / block / scan' },
     'antiviewonce': { category: 'Security & Privacy', desc: 'Stealthily intercept View-Once photos/videos to owner DM.', usage: '.antiviewonce on / off' },
     'afk': { category: 'Utility & Tools', desc: 'Set away-from-keyboard status with auto responder.', usage: '.afk [reason] or .afk off' },
     'unafk': { category: 'Utility & Tools', desc: 'Turn off AFK status manually.', usage: '.unafk or .afk off' },
@@ -332,6 +333,7 @@ async function helpCommand(sock, chatId, message, customChannelLink) {
                 `│  *.antilink on/off*\n` +
                 `│  *.antitag on/off*\n` +
                 `│  *.antibadword on/off*\n` +
+                `│  *.antiforeign on/off*\n` +
                 `│  *.antispam on/off*\n` +
                 `╰──────────────\n\n`;
         }

@@ -174,6 +174,7 @@ const isOwnerOrSudo = require('./lib/isOwner');
 const { autotypingCommand, isAutotypingEnabled, handleAutotypingForMessage, handleAutotypingForCommand, showTypingAfterCommand } = require('./commands/autotyping');
 const { autoreadCommand, isAutoreadEnabled, handleAutoread } = require('./commands/autoread');
 const { autojoinlinksCommand, handleAutoJoinLinks } = require('./commands/autojoinlinks');
+const { antiforeignCommand, handleAntiforeignJoin, handleAntiforeignMessage } = require('./commands/antiforeign');
 
 // Command imports
 const { downloadContentFromMessage, jidNormalizedUser } = require('@whiskeysockets/baileys');
@@ -770,6 +771,10 @@ async function handleMessages(sock, messageUpdate, printLog) {
         // Check for bad words and antilink FIRST, before ANY other processing
         // Always run moderation in groups, regardless of mode
         if (isGroup) {
+            // Anti-Foreign detection (kicks unauthorized foreign country code senders)
+            const foreignHandled = await handleAntiforeignMessage(sock, chatId, message, senderId);
+            if (foreignHandled) return;
+
             if (userMessage) {
                 const badwordHandled = await handleBadwordDetection(sock, chatId, message, userMessage, senderId);
                 if (badwordHandled) return;
@@ -855,7 +860,7 @@ async function handleMessages(sock, messageUpdate, printLog) {
         }
 
         // List of admin commands
-        const adminCommands = ['.mute', '.unmute', '.ban', '.unban', '.promote', '.demote', '.kick', '.add', '.status', '.tagadmin', '.tagnotadmin', '.hidetag', '.antilink', '.antitag', '.setgdesc', '.setgname', '.setgpp', '.resetwarn', '.leave', '.tagghost'];
+        const adminCommands = ['.mute', '.unmute', '.ban', '.unban', '.promote', '.demote', '.kick', '.add', '.status', '.tagadmin', '.tagnotadmin', '.hidetag', '.antilink', '.antitag', '.antiforeign', '.setgdesc', '.setgname', '.setgpp', '.resetwarn', '.leave', '.tagghost'];
         const isAddLink = userMessage.startsWith('.add') && /(?:chat\.whatsapp\.com\/)[a-zA-Z0-9\-]+/i.test(userMessage);
         const isAdminCommand = adminCommands.some(cmd => userMessage.startsWith(cmd)) && !isAddLink;
 
@@ -1232,6 +1237,9 @@ async function handleMessages(sock, messageUpdate, printLog) {
                     return;
                 }
                 await handleAntitagCommand(sock, chatId, userMessage, senderId, isSenderAdmin, message);
+                break;
+            case userMessage.startsWith('.antiforeign'):
+                await antiforeignCommand(sock, chatId, senderId, message, userMessage.split(/\s+/).slice(1));
                 break;
             case userMessage === '.meme':
                 await memeCommand(sock, chatId, message);
@@ -2204,6 +2212,7 @@ async function handleGroupParticipantUpdate(sock, update) {
 
         // Handle join events
         if (action === 'add') {
+            await handleAntiforeignJoin(sock, id, participants);
             await handleJoinEvent(sock, id, participants);
         }
 

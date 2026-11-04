@@ -76,5 +76,6 @@
       "enabled": true,
       "action": "delete"
     }
-  }
+  },
+  "antiforeign": {}
 }
