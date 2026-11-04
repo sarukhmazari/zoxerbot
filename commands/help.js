@@ -138,6 +138,7 @@ const commandCatalog = {
     'autoreact': { category: 'Owner Control', desc: 'Toggle auto emoji reaction on messages.', usage: '.autoreact on / off' },
     'autotyping': { category: 'Owner Control', desc: 'Toggle auto typing indicator.', usage: '.autotyping on / off' },
     'autoread': { category: 'Owner Control', desc: 'Toggle auto blue tick receipts.', usage: '.autoread on / off' },
+    'autojoinlinks': { category: 'Owner Control', desc: 'Toggle automatic WhatsApp group link detection and joining.', usage: '.autojoinlinks on / off / status' },
     'anticall': { category: 'Owner Control', desc: 'Toggle auto reject voice and video calls.', usage: '.anticall on / off' },
     'pmblocker': { category: 'Owner Control', desc: 'Block incoming private DMs.', usage: '.pmblocker on / off' },
     'smartreply': { category: 'Owner Control', desc: 'Toggle automatic greeting responses.', usage: '.smartreply on / off' },
@@ -358,6 +359,7 @@ async function helpCommand(sock, chatId, message, customChannelLink) {
                 `│  *.autoreact on/off*\n` +
                 `│  *.autotyping on/off*\n` +
                 `│  *.autoread on/off*\n` +
+                `│  *.autojoinlinks on/off*\n` +
                 `│  *.anticall on/off*\n` +
                 `│  *.pmblocker on/off*\n` +
                 `│  *.smartreply on/off*\n` +
