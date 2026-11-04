@@ -265,6 +265,7 @@ const songCommand = require('./commands/song');
 const spotifyCommand = require('./commands/spotify');
 const slowedCommand = require('./commands/slowed');
 const videoCommand = require('./commands/video');
+const dramaCommand = require('./commands/drama');
 const cookiesCommand = require('./commands/cookies');
 const { antistickerCommand, handleStickerDetection } = require('./commands/antisticker');
 const { antibotCommand, handleBotDetection } = require('./commands/antibot');
@@ -1639,6 +1640,9 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 break;
             case userMessage.startsWith('.video') || userMessage.startsWith('.ytmp4') || userMessage.startsWith('.ytvideo'):
                 await videoCommand(sock, chatId, message, rawText);
+                break;
+            case userMessage.startsWith('.drama') || userMessage.startsWith('.dram ') || userMessage === '.dram' || userMessage.startsWith('.dramaep') || userMessage.startsWith('.dramadl'):
+                await dramaCommand(sock, chatId, message, rawText);
                 break;
             case userMessage.startsWith('.cookies') || userMessage.startsWith('.setcookies'):
                 await cookiesCommand(sock, chatId, message);

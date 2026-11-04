@@ -23,6 +23,7 @@ const commandCatalog = {
     'spotify': { category: 'Media', desc: 'Download Spotify track with official artist metadata and cover art.', usage: '.spotify [title/link]' },
     'slowed': { category: 'Media', desc: 'Download song with aesthetic Slowed + Reverb audio processing.', usage: '.slowed [title/link]' },
     'video': { category: 'Media', desc: 'Download high definition MP4 video from YouTube.', usage: '.video [title/link]' },
+    'drama': { category: 'Media', desc: 'Download Pakistani/Turkish/Indian drama full episodes.', usage: '.drama [drama name/episode]' },
     'toaudio': { category: 'Media', desc: 'Extract audio from replied video or voice note into MP3.', usage: '.toaudio or .tomp3' },
     'tovideo': { category: 'Media', desc: 'Convert replied animated sticker or GIF into playable MP4.', usage: '.tovideo or .mp4' },
     'toptt': { category: 'Media', desc: 'Convert replied audio file into a native WhatsApp voice note.', usage: '.toptt or .vn' },
@@ -225,6 +226,7 @@ async function helpCommand(sock, chatId, message, customChannelLink) {
             `│  *.simage*\n` +
             `│  *.toaudio* 〔*.tomp3*〕\n` +
             `│  *.tovideo* 〔*.mp4*〕\n` +
+            `│  *.drama <name/ep>*\n` +
             `│  *.toptt* 〔*.vn*〕\n` +
             `│  *.qr <text/url>* 〔*.qrcode*〕\n` +
             `│  *.scanqr* 〔*.readqr*〕\n` +
