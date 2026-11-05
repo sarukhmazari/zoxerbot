@@ -9,36 +9,47 @@ function readJsonSafe(path, fallback) {
     }
 }
 
-const isOwnerOrSudo = require('../lib/isOwner');
+const {
+    getSessionPhone,
+    isSessionOwner,
+    getBotMode,
+    getAutoStatusConfig,
+    getAutoReactConfig,
+    getStealthConfig,
+    getAutoJoinLinksConfig,
+    getAutoReadConfig,
+    getAutoTypingConfig,
+    getAntiCallConfig,
+    getPmBlockerConfig
+} = require('../lib/session-settings');
 
 async function settingsCommand(sock, chatId, message) {
     try {
         const senderId = message.key.participant || message.key.remoteJid;
-        const isOwner = await isOwnerOrSudo(senderId, sock, chatId);
+        const isOwner = isSessionOwner(sock, senderId, message);
         
         if (!message.key.fromMe && !isOwner) {
-            await sock.sendMessage(chatId, { text: 'Only bot owner can use this command!' }, { quoted: message });
+            await sock.sendMessage(chatId, { text: 'Only session owner can use this command!' }, { quoted: message });
             return;
         }
 
         const isGroup = chatId.endsWith('@g.us');
+        const sessionPhone = getSessionPhone(sock);
         const dataDir = './data';
 
-        let mode = readJsonSafe(`${dataDir}/bot-settings.json`, { isPublic: true });
-        if (typeof mode.isPublic !== 'boolean') {
-            const legacyMode = readJsonSafe(`${dataDir}/messageCount.json`, { isPublic: true });
-            mode = { isPublic: typeof legacyMode.isPublic === 'boolean' ? legacyMode.isPublic : true };
-        }
-        const autoStatus = readJsonSafe(`${dataDir}/autoStatus.json`, { enabled: false });
-        const autoread = readJsonSafe(`${dataDir}/autoread.json`, { enabled: false });
-        const autotyping = readJsonSafe(`${dataDir}/autotyping.json`, { enabled: false });
-        const pmblocker = readJsonSafe(`${dataDir}/pmblocker.json`, { enabled: false });
-        const anticall = readJsonSafe(`${dataDir}/anticall.json`, { enabled: false });
-        const autojoinlinks = readJsonSafe(`${dataDir}/autojoinlinks.json`, { enabled: false });
+        const mode = getBotMode(sock);
+        const autoStatus = getAutoStatusConfig(sock);
+        const autoReact = getAutoReactConfig(sock);
+        const stealth = getStealthConfig(sock);
+        const autojoinlinks = getAutoJoinLinksConfig(sock);
+        const autoread = getAutoReadConfig(sock);
+        const autotyping = getAutoTypingConfig(sock);
+        const pmblocker = getPmBlockerConfig(sock);
+        const anticall = getAntiCallConfig(sock);
+
         const userGroupData = readJsonSafe(`${dataDir}/userGroupData.json`, {
             antilink: {}, antibadword: {}, welcome: {}, goodbye: {}, chatbot: {}, antitag: {}
         });
-        const autoReaction = Boolean(userGroupData.autoReaction);
 
         // Per-group features
         const groupId = isGroup ? chatId : null;
@@ -53,15 +64,16 @@ async function settingsCommand(sock, chatId, message) {
         const lines = [];
         lines.push('╭─ *⚙️ 𝗭𝗢𝗫𝗘𝗥 𝗦𝗘𝗧𝗧𝗜𝗡𝗚𝗦*');
         lines.push('┃');
-        lines.push('┣─〔 ◈ 𝗚𝗟𝗢𝗕𝗔𝗟 𝗖𝗢𝗡𝗙𝗜𝗚 〕');
-        lines.push(`┃  ◈ *Mode:* ${mode.isPublic ? 'Public' : 'Private'}`);
-        lines.push(`┃  ◈ *Auto Status:* ${autoStatus.enabled ? 'ON' : 'OFF'}`);
+        lines.push(`┣─〔 ◈ 𝗦𝗘𝗦𝗦𝗜𝗢𝗡: ${sessionPhone} 〕`);
+        lines.push(`┃  ◈ *Mode:* ${mode.isPublic ? 'Public' : 'Private (Default)'}`);
+        lines.push(`┃  ◈ *Auto Status:* ${autoStatus.enabled ? 'ON' : 'OFF (Default)'}`);
+        lines.push(`┃  ◈ *Auto React:* ${(autoReact.autoreact_dm || autoReact.enabledGroups.length > 0) ? 'ON' : 'OFF (Default)'}`);
+        lines.push(`┃  ◈ *Stealth Mode:* ${stealth.enabled ? 'ON' : 'OFF (Default)'}`);
+        lines.push(`┃  ◈ *Auto Join Links:* ${autojoinlinks.enabled ? 'ON' : 'OFF (Default)'}`);
         lines.push(`┃  ◈ *Autoread:* ${autoread.enabled ? 'ON' : 'OFF'}`);
         lines.push(`┃  ◈ *Autotyping:* ${autotyping.enabled ? 'ON' : 'OFF'}`);
         lines.push(`┃  ◈ *PM Blocker:* ${pmblocker.enabled ? 'ON' : 'OFF'}`);
         lines.push(`┃  ◈ *Anticall:* ${anticall.enabled ? 'ON' : 'OFF'}`);
-        lines.push(`┃  ◈ *Auto React:* ${autoReaction ? 'ON' : 'OFF'}`);
-        lines.push(`┃  ◈ *Auto Join Links:* ${autojoinlinks.enabled ? 'ON' : 'OFF'}`);
         if (groupId) {
             lines.push('┃');
             lines.push('┣─〔 ◈ 𝗚𝗥𝗢𝗨𝗣 𝗖𝗢𝗡𝗙𝗜𝗚 〕');

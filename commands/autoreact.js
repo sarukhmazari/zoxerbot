@@ -1,15 +1,18 @@
 /**
  * Zoxer Bot - WhatsApp Bot
- * Context-Aware Scoped Auto React System
- * - In Private Chat (DM): Enables/Disables auto-react for personal chats only.
- * - In Group Chat: Enables/Disables auto-react for that specific group only.
+ * Context-Aware Scoped Auto React System (Per-Session Scoped)
+ * - In Private Chat (DM): Enables/Disables auto-react for personal chats only for this session.
+ * - In Group Chat: Enables/Disables auto-react for that specific group only for this session.
+ * - STRICTLY OFF BY DEFAULT FOR ALL SESSIONS.
  */
 
-const fs = require('fs');
-const path = require('path');
-const isOwnerOrSudo = require('../lib/isOwner');
-
-const configPath = path.join(__dirname, '..', 'data', 'react.json');
+const {
+    getSessionPhone,
+    isSessionOwner,
+    getAutoReactConfig,
+    setAutoReactConfig,
+    isAutoReactEnabled: checkAutoReact
+} = require('../lib/session-settings');
 
 const defaultEmojis = [
     // ✨ Stars, Cosmic & Magic
@@ -24,51 +27,21 @@ const defaultEmojis = [
     "🖤", "🤍", "💜", "💙", "💖", "❤️‍🩹", "💤", "☣️", "☢️"
 ];
 
-const defaultData = {
-    autoreact_dm: false,
-    enabledGroups: [],
-    reactEmojis: defaultEmojis
-};
-
-// Ensure config exists and load safely
-function initConfig() {
-    try {
-        if (!fs.existsSync(configPath)) {
-            fs.mkdirSync(path.dirname(configPath), { recursive: true });
-            fs.writeFileSync(configPath, JSON.stringify(defaultData, null, 2));
-            return { ...defaultData };
-        }
-        const data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-        if (typeof data.autoreact_dm !== 'boolean') {
-            data.autoreact_dm = false;
-        }
-        if (!Array.isArray(data.enabledGroups)) {
-            data.enabledGroups = [];
-        }
-        if (!Array.isArray(data.reactEmojis) || data.reactEmojis.length === 0) {
-            data.reactEmojis = defaultData.reactEmojis;
-        }
-        return data;
-    } catch (err) {
-        console.error("Config error:", err);
-        return { ...defaultData };
-    }
-}
-
-// Command to toggle autoreact (.autoreact on / .autoreact off / .autoreact)
+// Command to toggle autoreact (.autoreact on / .autoreact off / .autoreact status)
 async function autoreactCommand(sock, chatId, message, args = []) {
     try {
         const senderId = message.key.participant || message.key.remoteJid;
-        const isOwner = await isOwnerOrSudo(senderId, sock, chatId);
+        const isOwner = isSessionOwner(sock, senderId, message);
 
         if (!message.key.fromMe && !isOwner) {
             return sock.sendMessage(chatId, {
-                text: '❌ This command is only for the owner!'
+                text: '❌ This command is only for the session owner!'
             }, { quoted: message });
         }
 
+        const sessionPhone = getSessionPhone(sock);
         const isGroup = chatId.endsWith('@g.us');
-        const config = initConfig();
+        const config = getAutoReactConfig(sock);
         const action = args.length > 0 ? args[0].toLowerCase() : null;
 
         if (action === 'status') {
@@ -79,6 +52,8 @@ async function autoreactCommand(sock, chatId, message, args = []) {
 
             const reply = `╭─ *⚡ 𝗭𝗢𝗫𝗘𝗥 𝗔𝗨𝗧𝗢-𝗥𝗘𝗔𝗖𝗧*
 ┃
+┃  ◈ *𝗦𝗘𝗦𝗦𝗜𝗢𝗡*
+┃  ◆ *${sessionPhone}*
 ┃  ◈ *𝗗𝗠 𝗦𝗧𝗔𝗧𝗨𝗦*
 ┃  ◆ *${dmStatus}*
 ┃  ◈ *𝗧𝗛𝗜𝗦 𝗖𝗛𝗔𝗧*
@@ -107,11 +82,12 @@ async function autoreactCommand(sock, chatId, message, args = []) {
                 isEnabled = !config.autoreact_dm;
             }
 
-            config.autoreact_dm = isEnabled;
-            fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+            setAutoReactConfig(sock, { autoreact_dm: isEnabled });
 
             const reply = `╭─ *⚡ 𝗭𝗢𝗫𝗘𝗥 𝗔𝗨𝗧𝗢-𝗥𝗘𝗔𝗖𝗧*
 ┃
+┃  ◈ *𝗦𝗘𝗦𝗦𝗜𝗢𝗡*
+┃  ◆ *${sessionPhone}*
 ┃  ◈ *𝗖𝗛𝗔𝗧 𝗦𝗖𝗢𝗣𝗘*
 ┃  ◆ *Personal DMs (Direct Messages)*
 ┃  ◈ *𝗦𝗧𝗔𝗧𝗨𝗦*
@@ -131,18 +107,21 @@ async function autoreactCommand(sock, chatId, message, args = []) {
                 isEnabled = !isAlreadyActive;
             }
 
+            let newGroups = [...config.enabledGroups];
             if (isEnabled) {
-                if (!config.enabledGroups.includes(chatId)) {
-                    config.enabledGroups.push(chatId);
+                if (!newGroups.includes(chatId)) {
+                    newGroups.push(chatId);
                 }
             } else {
-                config.enabledGroups = config.enabledGroups.filter(id => id !== chatId);
+                newGroups = newGroups.filter(id => id !== chatId);
             }
 
-            fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+            setAutoReactConfig(sock, { enabledGroups: newGroups });
 
             const reply = `╭─ *⚡ 𝗭𝗢𝗫𝗘𝗥 𝗔𝗨𝗧𝗢-𝗥𝗘𝗔𝗖𝗧*
 ┃
+┃  ◈ *𝗦𝗘𝗦𝗦𝗜𝗢𝗡*
+┃  ◆ *${sessionPhone}*
 ┃  ◈ *𝗖𝗛𝗔𝗧 𝗦𝗖𝗢𝗣𝗘*
 ┃  ◆ *This Group Only*
 ┃  ◈ *𝗦𝗧𝗔𝗧𝗨𝗦*
@@ -158,19 +137,9 @@ async function autoreactCommand(sock, chatId, message, args = []) {
 }
 
 // Check status
-function isAutoreactEnabled(chatId = null) {
-    try {
-        const config = initConfig();
-        if (!chatId) {
-            return Boolean(config.autoreact_dm || (Array.isArray(config.enabledGroups) && config.enabledGroups.length > 0));
-        }
-        if (chatId.endsWith('@g.us')) {
-            return Array.isArray(config.enabledGroups) && config.enabledGroups.includes(chatId);
-        }
-        return Boolean(config.autoreact_dm);
-    } catch {
-        return false;
-    }
+function isAutoreactEnabled(sock, chatId = null) {
+    if (!sock) return false;
+    return checkAutoReact(sock, chatId);
 }
 
 // React function
@@ -184,28 +153,19 @@ async function addAutoReaction(sock, message) {
 
         // Skip owners
         const senderId = message.key.participant || remoteJid;
-        const isOwner = await isOwnerOrSudo(senderId, sock, remoteJid);
+        const isOwner = isSessionOwner(sock, senderId, message);
         if (isOwner) return;
 
-        const config = initConfig();
-        const isGroup = remoteJid.endsWith('@g.us');
-
-        if (isGroup) {
-            // Group message: ONLY react if this group is explicitly enabled
-            if (!Array.isArray(config.enabledGroups) || !config.enabledGroups.includes(remoteJid)) {
-                return;
-            }
-        } else {
-            // Private DM: ONLY react if private DM autoreact is enabled
-            if (!config.autoreact_dm) {
-                return;
-            }
+        // Check if autoreact is enabled for THIS session and THIS chat (strictly OFF by default)
+        const isEnabled = isAutoreactEnabled(sock, remoteJid);
+        if (!isEnabled) {
+            return;
         }
 
-        // Select random emoji
+        const config = getAutoReactConfig(sock);
         const emojis = Array.isArray(config.reactEmojis) && config.reactEmojis.length > 0
             ? config.reactEmojis
-            : defaultData.reactEmojis;
+            : defaultEmojis;
 
         const emoji = emojis[Math.floor(Math.random() * emojis.length)];
 

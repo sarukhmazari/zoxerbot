@@ -298,6 +298,8 @@ const dpCommand = require('./commands/dp');
 const { anticallCommand, readState: readAnticallState } = require('./commands/anticall');
 const { pmblockerCommand, readState: readPmBlockerState } = require('./commands/pmblocker');
 const settingsCommand = require('./commands/settings');
+const { stealthCommand } = require('./commands/stealth');
+const { getSessionPhone, isSessionOwner, getBotMode, setBotMode } = require('./lib/session-settings');
 const soraCommand = require('./commands/sora');
 const statusCommand = require('./commands/status');
 const customCommand = require('./commands/custom');
@@ -341,32 +343,10 @@ setInterval(() => {
     }
 }, 10 * 60 * 1000); // Every 10 minutes
 
-// 🛠️ Optimization: Cache bot mode in memory to avoid constant disk IO
-let cachedBotMode = { isPublic: true, lastUpdate: 0 };
-function readBotModeFile() {
-    const modePath = './data/bot-settings.json';
-    const legacyPath = './data/messageCount.json';
-    try {
-        if (fs.existsSync(modePath)) {
-            const data = JSON.parse(fs.readFileSync(modePath, 'utf8'));
-            if (typeof data.isPublic === 'boolean') return data;
-        }
-        if (fs.existsSync(legacyPath)) {
-            const data = JSON.parse(fs.readFileSync(legacyPath, 'utf8'));
-            if (typeof data.isPublic === 'boolean') {
-                fs.writeFileSync(modePath, JSON.stringify({ isPublic: data.isPublic }, null, 2));
-                return { isPublic: data.isPublic };
-            }
-        }
-    } catch (e) { }
-    return { isPublic: true };
-}
-function getCachedMode() {
-    const now = Date.now();
-    if (now - cachedBotMode.lastUpdate > 30000) { // Refresh every 30 seconds
-        cachedBotMode = { ...readBotModeFile(), lastUpdate: now };
-    }
-    return cachedBotMode;
+// 🛠️ Session-aware bot mode (Strictly PRIVATE by default for every session)
+function getCachedMode(sock = null) {
+    if (sock) return getBotMode(sock);
+    return { mode: 'private', isPublic: false };
 }
 
 // Global settings
@@ -731,10 +711,12 @@ async function handleMessages(sock, messageUpdate, printLog) {
             const senderClean = senderId ? senderId.split('@')[0].split(':')[0] : 'Unknown';
             console.log(`📌 [COMMAND] "${rawText.trim()}" | User: @${senderClean} | ${isGroup ? `Group: ${chatId}` : 'Private DM'}`);
         }
-        // Read bot mode from cache
-        const configMode = getCachedMode();
-        let isPublic = configMode.isPublic;
-        const isOwnerOrSudoCheck = message.key.fromMe || senderIsOwnerOrSudo;
+        // Read bot mode for THIS session (Strictly private by default for all sessions)
+        const sessionPhone = getSessionPhone(sock);
+        const botModeObj = getBotMode(sock);
+        let isPublic = botModeObj.isPublic;
+        const isSessionOwnerCheck = isSessionOwner(sock, senderId, message);
+        const isOwnerOrSudoCheck = isSessionOwnerCheck;
         // Check if user is banned (skip ban check for unban command)
         if (isBanned(senderId) && !userMessage.startsWith('.unban')) {
             // Only respond occasionally to avoid spam
@@ -866,7 +848,7 @@ async function handleMessages(sock, messageUpdate, printLog) {
         const isAdminCommand = adminCommands.some(cmd => userMessage.startsWith(cmd)) && !isAddLink;
 
         // List of owner commands
-        const ownerCommands = ['.mode', '.smartreply', '.autostatus', '.antidelete', '.cleartmp', '.setpp', '.clearsession', '.areact', '.autoreact', '.autotyping', '.autoread', '.autojoinlinks', '.pmblocker', '.setmenudp', '.setdp', '.setmenumusic', '.setmusic', '.setdpd', '.setdpdefault', '.restart', '.reboot', '.broadcast', '.bc', '.block', '.unblock', '.setname', '.setbio', '.setabout'];
+        const ownerCommands = ['.mode', '.stealth', '.smartreply', '.autostatus', '.antidelete', '.cleartmp', '.setpp', '.clearsession', '.areact', '.autoreact', '.autotyping', '.autoread', '.autojoinlinks', '.pmblocker', '.setmenudp', '.setdp', '.setmenumusic', '.setmusic', '.setdpd', '.setdpdefault', '.restart', '.reboot', '.broadcast', '.bc', '.block', '.unblock', '.setname', '.setbio', '.setabout'];
         const isOwnerCommand = ownerCommands.some(cmd => userMessage.startsWith(cmd));
 
         let isSenderAdmin = false;
@@ -903,8 +885,8 @@ async function handleMessages(sock, messageUpdate, printLog) {
 
         // Check owner status for owner commands
         if (isOwnerCommand) {
-            if (!message.key.fromMe && !senderIsOwnerOrSudo) {
-                await sock.sendMessage(chatId, { text: '❌ This command is only available for the owner or sudo!' }, { quoted: message });
+            if (!message.key.fromMe && !isSessionOwnerCheck) {
+                await sock.sendMessage(chatId, { text: '❌ This command is only available for the session owner!' }, { quoted: message });
                 return;
             }
         }
@@ -1092,42 +1074,31 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 await setmenumusicCommand(sock, chatId, message);
                 commandExecuted = true;
                 break;
-            case userMessage.startsWith('.mode'):
-                // Check if sender is the owner
-                {
-                    const modeSenderId = message.key.participant || message.key.remoteJid;
-                    const isModeOwner = await isOwnerOrSudo(modeSenderId, sock, chatId);
-                    if (!message.key.fromMe && !isModeOwner) {
-                        await sock.sendMessage(chatId, { text: 'Only bot owner can use this command!', ...channelInfo }, { quoted: message });
-                        return;
-                    }
-                }
-                // Read current data first
-                let data = { isPublic: true };
-                try {
-                    if (!fs.existsSync('./data')) fs.mkdirSync('./data', { recursive: true });
-                    const modeFilePath = './data/bot-settings.json';
-                    if (!fs.existsSync(modeFilePath)) {
-                        const legacyPath = './data/messageCount.json';
-                        if (fs.existsSync(legacyPath)) {
-                            const legacyData = JSON.parse(fs.readFileSync(legacyPath, 'utf8'));
-                            if (typeof legacyData.isPublic === 'boolean') {
-                                data = { isPublic: legacyData.isPublic };
-                            }
-                        }
-                        fs.writeFileSync(modeFilePath, JSON.stringify(data, null, 2));
-                    }
-                    data = JSON.parse(fs.readFileSync(modeFilePath, 'utf8'));
-                } catch (error) {
-                    /* fallback to default */
+            case userMessage.startsWith('.mode'): {
+                const isModeOwner = isSessionOwner(sock, senderId, message);
+                if (!message.key.fromMe && !isModeOwner) {
+                    await sock.sendMessage(chatId, { text: '❌ Only the session owner can use this command!', ...channelInfo }, { quoted: message });
+                    return;
                 }
 
+                const currentSessionPhone = getSessionPhone(sock);
+                const currentModeObj = getBotMode(sock);
                 const action = userMessage.split(' ')[1]?.toLowerCase();
-                // If no argument provided, show current status
+
                 if (!action) {
-                    const currentMode = data.isPublic ? 'public' : 'private';
+                    const currentMode = currentModeObj.mode;
                     await sock.sendMessage(chatId, {
-                        text: `Current bot mode: *${currentMode}*\n\nUsage: .mode public/private\n\nExample:\n.mode public - Allow everyone to use bot\n.mode private - Restrict to owner only`,
+                        text: `╭─ *⚙️ 𝗭𝗢𝗫𝗘𝗥 𝗕𝗢𝗧 𝗠𝗢𝗗𝗘*
+┃
+┃  ◈ *𝗦𝗘𝗦𝗦𝗜𝗢𝗡*
+┃  ◆ *${currentSessionPhone}*
+┃  ◈ *𝗖𝗨𝗥𝗥𝗘𝗡𝗧 𝗠𝗢𝗗𝗘*
+┃  ◆ *${currentMode.toUpperCase()}*
+┃
+┃  • \`.mode public\` - Allow everyone in chats to use bot commands
+┃  • \`.mode private\` - Restrict commands to session owner only
+┃
+╰───────────────`,
                         ...channelInfo
                     }, { quoted: message });
                     return;
@@ -1135,24 +1106,31 @@ async function handleMessages(sock, messageUpdate, printLog) {
 
                 if (action !== 'public' && action !== 'private') {
                     await sock.sendMessage(chatId, {
-                        text: 'Usage: .mode public/private\n\nExample:\n.mode public - Allow everyone to use bot\n.mode private - Restrict to owner only',
+                        text: '❌ Usage: `.mode public` or `.mode private`\n\n• `.mode public` - Allow everyone to use bot\n• `.mode private` - Restrict to owner only',
                         ...channelInfo
                     }, { quoted: message });
                     return;
                 }
 
                 try {
-                    // Update access mode
-                    data.isPublic = action === 'public';
-
-                    // Save updated data
-                    fs.writeFileSync('./data/bot-settings.json', JSON.stringify({ isPublic: data.isPublic }, null, 2));
-
-                    await sock.sendMessage(chatId, { text: `Bot is now in *${action}* mode`, ...channelInfo });
+                    setBotMode(sock, action);
+                    await sock.sendMessage(chatId, {
+                        text: `✅ Session *${currentSessionPhone}* is now in *${action.toUpperCase()}* mode!\n\n` +
+                              (action === 'public'
+                                  ? '🌐 Everyone in chats can now use public bot commands!'
+                                  : '🔒 Only the session owner can use commands now.'),
+                        ...channelInfo
+                    }, { quoted: message });
                 } catch (error) {
-                    console.error('Error updating access mode:', error);
-                    await sock.sendMessage(chatId, { text: 'Failed to update bot access mode', ...channelInfo });
+                    console.error('Error updating bot mode:', error);
+                    await sock.sendMessage(chatId, { text: '❌ Failed to update bot mode.', ...channelInfo }, { quoted: message });
                 }
+                commandExecuted = true;
+                break;
+            }
+            case userMessage.startsWith('.stealth'):
+                await stealthCommand(sock, chatId, message, userMessage.split(/\s+/).slice(1));
+                commandExecuted = true;
                 break;
             case userMessage.startsWith('.anticall'):
                 if (!message.key.fromMe && !senderIsOwnerOrSudo) {
@@ -2116,20 +2094,7 @@ async function handleGroupParticipantUpdate(sock, update) {
         if (!id.endsWith('@g.us')) return;
 
         // Respect bot mode: only announce promote/demote in public mode
-        let isPublic = true;
-        try {
-            const modePath = './data/bot-settings.json';
-            const legacyPath = './data/messageCount.json';
-            if (fs.existsSync(modePath)) {
-                const modeData = JSON.parse(fs.readFileSync(modePath, 'utf8'));
-                if (typeof modeData.isPublic === 'boolean') isPublic = modeData.isPublic;
-            } else if (fs.existsSync(legacyPath)) {
-                const modeData = JSON.parse(fs.readFileSync(legacyPath, 'utf8'));
-                if (typeof modeData.isPublic === 'boolean') isPublic = modeData.isPublic;
-            }
-        } catch (e) {
-            // If reading fails, default to public behavior
-        }
+        const isPublic = getBotMode(sock).isPublic;
 
         // Handle promotion events
         if (action === 'promote') {

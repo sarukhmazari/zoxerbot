@@ -1,18 +1,4 @@
 {
   "autoreact": false,
-  "reactEmojis": [
-    "🪀",
-    "🥏",
-    "🤩",
-    "💔",
-    "🕐️",
-    "🤍",
-    "🥵",
-    "❤️",
-    "👍",
-    "🎉",
-    "✨",
-    "🌟"
-  ],
-  "customReacts": {}
+  "sessions": {}
 }

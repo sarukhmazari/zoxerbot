@@ -1,17 +1,17 @@
 /**
  * Zoxer Bot - A WhatsApp Bot
- * Autojoinlinks Command & Auto Group Join Engine
+ * Autojoinlinks Command & Auto Group Join Engine (Per-Session Scoped)
+ * STRICTLY OFF BY DEFAULT FOR ALL SESSIONS
  */
 
 const fs = require('fs');
 const path = require('path');
-const isOwnerOrSudo = require('../lib/isOwner');
+const { getSessionPhone, isSessionOwner } = require('../lib/session-settings');
 
 // Path to configuration file
 const configPath = path.join(__dirname, '..', 'data', 'autojoinlinks.json');
 
 // In-memory cache for processed invitation codes to prevent duplicate queries/joins
-// Key: inviteCode, Value: { status: 'joined' | 'already_member' | 'invalid' | 'failed', groupId?: string, timestamp: number }
 const processedInviteCodes = new Map();
 const MAX_PROCESSED_CODES = 2000;
 const CODE_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -61,15 +61,8 @@ function saveConfig(config) {
 }
 
 /**
- * Extract clean session phone number from socket
- */
-function getSessionPhone(sock) {
-    if (!sock?.user?.id) return 'default';
-    return String(sock.user.id).split(':')[0].split('@')[0].replace(/[^0-9]/g, '') || 'default';
-}
-
-/**
- * Check whether auto-join is enabled for this session or globally
+ * Check whether auto-join is enabled for this session
+ * STRICTLY OFF BY DEFAULT FOR ALL SESSIONS
  */
 function isAutoJoinEnabled(sessionPhone) {
     try {
@@ -77,7 +70,8 @@ function isAutoJoinEnabled(sessionPhone) {
         if (sessionPhone && config.sessions && config.sessions[sessionPhone] && typeof config.sessions[sessionPhone].enabled === 'boolean') {
             return config.sessions[sessionPhone].enabled;
         }
-        return Boolean(config.enabled);
+        // STRICT REQUIREMENT: default is false for all sessions
+        return false;
     } catch (error) {
         console.error('[AUTOJOINLINKS] Error checking enabled status:', error.message || error);
         return false;
@@ -95,7 +89,6 @@ function cleanProcessedCodesCache() {
         }
     }
     if (processedInviteCodes.size > MAX_PROCESSED_CODES) {
-        // Drop oldest entries
         const keys = Array.from(processedInviteCodes.keys());
         for (let i = 0; i < keys.length - MAX_PROCESSED_CODES; i++) {
             processedInviteCodes.delete(keys[i]);
@@ -115,17 +108,10 @@ function withTimeout(promise, ms = 12000, errorMsg = 'Operation timed out') {
 
 /**
  * Extract WhatsApp group invitation codes from text
- * Supports:
- * - https://chat.whatsapp.com/INVITECODE
- * - http://chat.whatsapp.com/INVITECODE
- * - chat.whatsapp.com/INVITECODE
- * - www.chat.whatsapp.com/INVITECODE
- * Handles emojis, surrounding text, query parameters, trailing dots/punctuation.
  */
 function extractGroupInviteCodes(text) {
     if (!text || typeof text !== 'string') return [];
 
-    // Regex to match chat.whatsapp.com URL patterns
     const regex = /(?:https?:\/\/)?(?:www\.)?chat\.whatsapp\.com\/([a-zA-Z0-9_-]+)/gi;
     const codes = new Set();
     let match;
@@ -134,14 +120,12 @@ function extractGroupInviteCodes(text) {
         const rawPart = match[1];
         if (!rawPart) continue;
 
-        // Strip query params, hash anchors, trailing punctuation
         const cleanPart = rawPart
             .split('?')[0]
             .split('#')[0]
             .replace(/[.,!?:;)"']+$/, '')
             .trim();
 
-        // WhatsApp group invite codes are 10-35 characters (alphanumeric, underscore, hyphen)
         if (cleanPart.length >= 10 && cleanPart.length <= 35 && /^[a-zA-Z0-9_-]+$/.test(cleanPart)) {
             codes.add(cleanPart);
         }
@@ -198,13 +182,11 @@ function markGroupJoined(sessionPhone, groupJid) {
 async function processInviteCode(sock, code, sessionPhone) {
     cleanProcessedCodesCache();
 
-    // Check if code was already processed recently
     const existing = processedInviteCodes.get(code);
     if (existing) {
         if (existing.status === 'joined' || existing.status === 'already_member') {
             return { success: false, reason: 'already_handled', groupId: existing.groupId };
         }
-        // If it failed/invalid in the last 1 hour, don't spam requests
         if (Date.now() - existing.timestamp < 60 * 60 * 1000) {
             return { success: false, reason: existing.status };
         }
@@ -213,7 +195,6 @@ async function processInviteCode(sock, code, sessionPhone) {
     let targetGroupId = null;
     let groupSubject = '';
 
-    // Step 1: Query group metadata via invite info to get the group JID and info
     try {
         if (typeof sock.groupGetInviteInfo === 'function') {
             const inviteInfo = await withTimeout(
@@ -230,7 +211,6 @@ async function processInviteCode(sock, code, sessionPhone) {
         const errorMsg = String(infoError.message || infoError).toLowerCase();
         const statusCode = infoError.output?.statusCode || infoError.status || infoError.data;
 
-        // If link is expired, revoked, or not found
         if (statusCode === 404 || statusCode === 410 || statusCode === 401 || errorMsg.includes('not-authorized') || errorMsg.includes('gone')) {
             console.warn(`[AUTOJOINLINKS] Invite code ${code} is invalid, expired, or revoked (Status ${statusCode}).`);
             processedInviteCodes.set(code, { status: 'invalid', timestamp: Date.now() });
@@ -240,7 +220,6 @@ async function processInviteCode(sock, code, sessionPhone) {
         console.warn(`[AUTOJOINLINKS] groupGetInviteInfo error for code ${code}:`, infoError.message || infoError);
     }
 
-    // Step 2: Check if bot is already a member of this group
     const participatingJids = await getParticipatingGroups(sock, sessionPhone);
     if (targetGroupId && participatingJids.has(targetGroupId.toLowerCase())) {
         console.log(`[AUTOJOINLINKS] Bot is already a member of group: "${groupSubject}" (${targetGroupId}). Skipping.`);
@@ -248,22 +227,18 @@ async function processInviteCode(sock, code, sessionPhone) {
         return { success: false, reason: 'already_member', groupId: targetGroupId, subject: groupSubject };
     }
 
-    // Secondary check: verify with sock.groupMetadata if available
     if (targetGroupId && typeof sock.groupMetadata === 'function') {
         try {
             const meta = await withTimeout(sock.groupMetadata(targetGroupId), 5000);
             if (meta && meta.id) {
-                console.log(`[AUTOJOINLINKS] Bot is already a member (verified via groupMetadata) of group: "${meta.subject || targetGroupId}". Skipping.`);
+                console.log(`[AUTOJOINLINKS] Bot is already a member of group: "${meta.subject || targetGroupId}". Skipping.`);
                 markGroupJoined(sessionPhone, targetGroupId);
                 processedInviteCodes.set(code, { status: 'already_member', groupId: targetGroupId, timestamp: Date.now() });
                 return { success: false, reason: 'already_member', groupId: targetGroupId, subject: meta.subject };
             }
-        } catch (_) {
-            // Expected: when bot is not a member, groupMetadata fails
-        }
+        } catch (_) {}
     }
 
-    // Step 3: Attempt to join using sock.groupAcceptInvite(code)
     try {
         console.log(`[AUTOJOINLINKS] Attempting to join group "${groupSubject || code}" via code: ${code}...`);
         const joinedJid = await withTimeout(
@@ -284,7 +259,6 @@ async function processInviteCode(sock, code, sessionPhone) {
         const errorMsg = String(joinError.message || joinError).toLowerCase();
         const statusCode = joinError.output?.statusCode || joinError.status || joinError.data;
 
-        // 409: Conflict -> Bot is already a participant in the group
         if (statusCode === 409 || errorMsg.includes('409') || errorMsg.includes('conflict')) {
             console.log(`[AUTOJOINLINKS] Bot is already a member (Status 409) for code ${code}.`);
             if (targetGroupId) markGroupJoined(sessionPhone, targetGroupId);
@@ -292,7 +266,6 @@ async function processInviteCode(sock, code, sessionPhone) {
             return { success: false, reason: 'already_member', groupId: targetGroupId };
         }
 
-        // 401 / 403 / 404 / 410: Expired, revoked, or requires membership approval
         if (statusCode === 401 || statusCode === 403 || statusCode === 404 || statusCode === 410) {
             console.warn(`[AUTOJOINLINKS] Join rejected (Status ${statusCode}) for code ${code}: ${joinError.message}`);
             processedInviteCodes.set(code, { status: 'rejected', timestamp: Date.now() });
@@ -307,7 +280,6 @@ async function processInviteCode(sock, code, sessionPhone) {
 
 /**
  * Handle incoming message for automatic group link detection and joining
- * Called for all messages across group and private chats.
  */
 async function handleAutoJoinLinks(sock, message, rawText) {
     try {
@@ -315,17 +287,15 @@ async function handleAutoJoinLinks(sock, message, rawText) {
 
         const sessionPhone = getSessionPhone(sock);
 
-        // Check if feature is enabled for this session
+        // Check if feature is enabled for this session (strictly OFF by default)
         if (!isAutoJoinEnabled(sessionPhone)) {
             return;
         }
 
-        // Fast check before regex: must contain 'chat.whatsapp.com'
         if (!rawText.toLowerCase().includes('chat.whatsapp.com')) {
             return;
         }
 
-        // Ignore if this is the .add command (which handles invite links explicitly for member transfer)
         const trimmed = rawText.trim().toLowerCase();
         if (trimmed.startsWith('.add ') || trimmed === '.add') {
             return;
@@ -334,7 +304,6 @@ async function handleAutoJoinLinks(sock, message, rawText) {
         const codes = extractGroupInviteCodes(rawText);
         if (codes.length === 0) return;
 
-        // Queue join operations sequentially to avoid WhatsApp rate limits and concurrency issues
         joinQueuePromise = joinQueuePromise.then(async () => {
             for (let i = 0; i < codes.length; i++) {
                 const code = codes[i];
@@ -344,7 +313,6 @@ async function handleAutoJoinLinks(sock, message, rawText) {
                     console.error(`[AUTOJOINLINKS] Unexpected error processing code ${code}:`, codeErr.message || codeErr);
                 }
 
-                // Safe 2.5 second delay between multiple link joins
                 if (i + 1 < codes.length) {
                     await new Promise(resolve => setTimeout(resolve, 2500));
                 }
@@ -359,20 +327,16 @@ async function handleAutoJoinLinks(sock, message, rawText) {
 }
 
 /**
- * .autojoinlinks Command Handler
- * Commands:
- * - .autojoinlinks on
- * - .autojoinlinks off
- * - .autojoinlinks status
+ * .autojoinlinks Command Handler (Session-Scoped)
  */
 async function autojoinlinksCommand(sock, chatId, message, args = []) {
     try {
         const senderId = message.key.participant || message.key.remoteJid;
-        const isOwner = await isOwnerOrSudo(senderId, sock, chatId);
+        const isOwner = isSessionOwner(sock, senderId, message);
 
         if (!message.key.fromMe && !isOwner) {
             await sock.sendMessage(chatId, {
-                text: '❌ This command is only available for the owner!'
+                text: '❌ This command is only available for the session owner!'
             }, { quoted: message });
             return;
         }
@@ -384,13 +348,13 @@ async function autojoinlinksCommand(sock, chatId, message, args = []) {
         const subCommand = (args[0] || '').toLowerCase().trim();
 
         if (subCommand === 'on' || subCommand === 'enable') {
-            config.enabled = true;
+            config.enabled = false; // Always keep global fallback OFF
             if (!config.sessions) config.sessions = {};
             config.sessions[sessionPhone] = { enabled: true };
             saveConfig(config);
 
             await sock.sendMessage(chatId, {
-                text: 'Auto Join Links has been enabled successfully.'
+                text: `✅ Auto Join Links has been enabled for session *${sessionPhone}*.`
             }, { quoted: message });
             return;
         }
@@ -402,20 +366,20 @@ async function autojoinlinksCommand(sock, chatId, message, args = []) {
             saveConfig(config);
 
             await sock.sendMessage(chatId, {
-                text: 'Auto Join Links has been disabled.'
+                text: `❌ Auto Join Links has been disabled for session *${sessionPhone}*.`
             }, { quoted: message });
             return;
         }
 
         if (subCommand === 'status') {
             await sock.sendMessage(chatId, {
-                text: `Auto Join Links: ${currentStatus ? 'ON' : 'OFF'}`
+                text: `Auto Join Links for session *${sessionPhone}*: ${currentStatus ? 'ON' : 'OFF'}`
             }, { quoted: message });
             return;
         }
 
         // Default: display status and command usage guidance
-        const reply = `Auto Join Links: ${currentStatus ? 'ON' : 'OFF'}\n\n*Usage:*\n• \`.autojoinlinks on\` — Enable automatic joining\n• \`.autojoinlinks off\` — Disable automatic joining\n• \`.autojoinlinks status\` — Check current status`;
+        const reply = `Auto Join Links for session *${sessionPhone}*: ${currentStatus ? 'ON' : 'OFF'}\n\n*Usage:*\n• \`.autojoinlinks on\` — Enable automatic joining for this session\n• \`.autojoinlinks off\` — Disable automatic joining for this session\n• \`.autojoinlinks status\` — Check current status`;
 
         await sock.sendMessage(chatId, { text: reply }, { quoted: message });
 

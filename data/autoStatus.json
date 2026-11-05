@@ -1,4 +1,6 @@
 {
-  "enabled": true,
-  "reactOn": false
+  "enabled": false,
+  "reactOn": false,
+  "reactEmoji": "❤️",
+  "sessions": {}
 }

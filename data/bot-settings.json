@@ -1,3 +1,4 @@
 {
-  "isPublic": true
+  "defaultMode": "private",
+  "sessions": {}
 }

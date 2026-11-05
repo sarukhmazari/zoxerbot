@@ -183,19 +183,9 @@ async function helpCommand(sock, chatId, message, customChannelLink) {
             isSenderAdmin = adminCheck.isSenderAdmin;
         }
 
-        // Get Bot Mode
-        let isPublic = true;
-        try {
-            const modePath = './data/bot-settings.json';
-            const legacyPath = './data/messageCount.json';
-            if (fs.existsSync(modePath)) {
-                const data = JSON.parse(fs.readFileSync(modePath, 'utf8'));
-                if (typeof data.isPublic === 'boolean') isPublic = data.isPublic;
-            } else if (fs.existsSync(legacyPath)) {
-                const data = JSON.parse(fs.readFileSync(legacyPath, 'utf8'));
-                if (typeof data.isPublic === 'boolean') isPublic = data.isPublic;
-            }
-        } catch (_) {}
+        // Get Bot Mode for this session (Private by default)
+        const { getBotMode } = require('../lib/session-settings');
+        const isPublic = getBotMode(sock).isPublic;
         const mode = isPublic ? '𝗣𝗨𝗕𝗟𝗜𝗖' : '𝗣𝗥𝗜𝗩𝗔𝗧𝗘';
 
         // Construct requested custom stylized menu
