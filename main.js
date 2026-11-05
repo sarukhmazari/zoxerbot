@@ -311,6 +311,7 @@ const { handleSpamDetection, isUserIgnored } = require('./lib/spamTracker');
 const { handleAntispamDetection } = require('./lib/antispamTracker');
 const { smartreplyCommand, getSmartReplyStatus } = require('./commands/smartreply');
 const toAudioCommand = require('./commands/toaudio');
+const reelsAudioCommand = require('./commands/reelsaudio');
 const toVideoCommand = require('./commands/tovideo');
 const toPttCommand = require('./commands/toptt');
 const qrcodeCommand = require('./commands/qrcode');
@@ -1888,6 +1889,10 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 break;
             case userMessage === '.toaudio' || userMessage === '.tomp3':
                 await toAudioCommand(sock, chatId, message);
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.reelsaudio') || userMessage.startsWith('.extractaudio') || userMessage.startsWith('.reelsmp3') || userMessage.startsWith('.reelaudio'):
+                await reelsAudioCommand(sock, chatId, message, rawText);
                 commandExecuted = true;
                 break;
             case userMessage === '.tovideo' || userMessage === '.mp4':

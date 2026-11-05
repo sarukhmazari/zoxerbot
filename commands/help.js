@@ -25,6 +25,7 @@ const commandCatalog = {
     'video': { category: 'Media', desc: 'Download high definition MP4 video from YouTube.', usage: '.video [title/link]' },
     'drama': { category: 'Media', desc: 'Download Pakistani/Turkish/Indian drama full episodes.', usage: '.drama [drama name/episode]' },
     'toaudio': { category: 'Media', desc: 'Extract audio from replied video or voice note into MP3.', usage: '.toaudio or .tomp3' },
+    'reelsaudio': { category: 'Media', desc: 'Extract trending audio from Instagram Reel, TikTok, or replied video.', usage: '.reelsaudio [url or reply to video]' },
     'tovideo': { category: 'Media', desc: 'Convert replied animated sticker or GIF into playable MP4.', usage: '.tovideo or .mp4' },
     'toptt': { category: 'Media', desc: 'Convert replied audio file into a native WhatsApp voice note.', usage: '.toptt or .vn' },
     'qr': { category: 'Media', desc: 'Generate a scannable QR code image from given text or URL.', usage: '.qr [text/url]' },
@@ -216,6 +217,7 @@ async function helpCommand(sock, chatId, message, customChannelLink) {
             `│  *.take <pack> | <author>* 〔*.steal*〕\n` +
             `│  *.simage*\n` +
             `│  *.toaudio* 〔*.tomp3*〕\n` +
+            `│  *.reelsaudio <url/reply>* 〔*.extractaudio*, *.reelsmp3*〕\n` +
             `│  *.tovideo* 〔*.mp4*〕\n` +
             `│  *.drama <name/ep>*\n` +
             `│  *.toptt* 〔*.vn*〕\n` +
