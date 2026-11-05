@@ -58,6 +58,7 @@ const commandCatalog = {
     'facebook': { category: 'Search & Info', desc: 'Download Facebook video.', usage: '.facebook [url]' },
     'instagram': { category: 'Search & Info', desc: 'Download Instagram reel or post.', usage: '.instagram [url]' },
     'tiktok': { category: 'Search & Info', desc: 'Download TikTok video.', usage: '.tiktok [url]' },
+    'apk': { category: 'Search & Info', desc: 'Search and download Android APK apps and games directly.', usage: '.apk [app name]' },
     'song': { category: 'Search & Info', desc: 'Search and download MP3 audio from YouTube.', usage: '.song <name/url> or .play <name>' },
     'play': { category: 'Search & Info', desc: 'Search and play song audio.', usage: '.play <song name>' },
     'spotify': { category: 'Search & Info', desc: 'Download high quality 320kbps MP3 from Spotify link.', usage: '.spotify <link/title>' },
@@ -254,6 +255,7 @@ async function helpCommand(sock, chatId, message, customChannelLink) {
             `│  *.facebook <url>* 〔*.fb*〕\n` +
             `│  *.instagram <url>* 〔*.ig*, *.insta*〕\n` +
             `│  *.tiktok <url>* 〔*.tt*〕\n` +
+            `│  *.apk <app name>* 〔*.app*〕\n` +
             `╰──────────────\n\n` +
             `╭─〔 ♟ 𝗚𝗔𝗠𝗘𝗦 & 𝗙𝗨𝗡 〕\n` +
             `│  *.tictactoe @user* 〔*.ttt*〕\n` +
