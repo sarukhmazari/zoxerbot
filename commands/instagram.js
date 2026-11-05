@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execFile } = require('child_process');
-const btch = require('btch-downloader');
+const { ultraigdl } = require('ultra-igdl');
 const rahad = require('rahad-all-downloader-v2');
 const { fetchMediaFromApi } = require('../lib/mediaApi');
 
@@ -11,7 +11,7 @@ const { fetchMediaFromApi } = require('../lib/mediaApi');
 const processedMessages = new Set();
 
 /**
- * Filter out fake advertisement links returned by some free scraper endpoints
+ * Filter out fake advertisement links
  */
 function isAdUrl(url) {
     if (!url || typeof url !== 'string') return true;
@@ -88,7 +88,6 @@ async function instagramCommand(sock, chatId, message, rawText = '') {
             }, { quoted: message });
         }
 
-        // Clean link to remove extraneous tracking parameters
         const cleanUrl = targetUrl.split('?')[0].replace(/\/+$/, '') + '/';
 
         await sock.sendMessage(chatId, {
@@ -98,53 +97,92 @@ async function instagramCommand(sock, chatId, message, rawText = '') {
         let delivered = false;
         let lastError = null;
 
-        // TIER 1: BTCH Downloader (Super fast & reliable for both Reels and Photos)
+        // TIER 1: Official Zoxer Cloudflare Media API (sarukhapi)
         try {
-            const btchRes = await btch.igdl(cleanUrl);
-            if (btchRes && btchRes.status && Array.isArray(btchRes.result) && btchRes.result.length > 0) {
-                for (const item of btchRes.result.slice(0, 5)) {
-                    const downloadUrl = item.url;
-                    if (downloadUrl && !isAdUrl(downloadUrl)) {
-                        // Download buffer to reliably check content type and avoid Baileys stream blocks
-                        const res = await axios.get(downloadUrl, {
-                            responseType: 'arraybuffer',
-                            timeout: 60000,
-                            headers: {
-                                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                            }
-                        });
+            const media = await fetchMediaFromApi(cleanUrl, 'video');
+            const downloadUrl = media.downloadUrl;
 
-                        const disposition = res.headers['content-disposition'] || '';
-                        const contentType = res.headers['content-type'] || '';
-                        const isVideo = disposition.includes('.mp4') || contentType.includes('video');
+            if (downloadUrl && !isAdUrl(downloadUrl)) {
+                const isVideo = media.type === 'video' || /\.mp4(\?|$)/i.test(downloadUrl) || media.format === 'mp4';
+                const caption = `📸 *${media.title || 'Instagram Media'}*\n\n⚡ *Downloaded by ZoxerBot*`;
 
-                        const caption = `📸 *Instagram Media*\n\n⚡ *Downloaded by ZoxerBot*`;
-
-                        if (isVideo) {
-                            await sock.sendMessage(chatId, {
-                                video: Buffer.from(res.data),
-                                mimetype: 'video/mp4',
-                                caption,
-                                ...global.channelInfo
-                            }, { quoted: message });
-                        } else {
-                            await sock.sendMessage(chatId, {
-                                image: Buffer.from(res.data),
-                                mimetype: 'image/jpeg',
-                                caption,
-                                ...global.channelInfo
-                            }, { quoted: message });
-                        }
-                        delivered = true;
+                const res = await axios.get(downloadUrl, {
+                    responseType: 'arraybuffer',
+                    timeout: 60000,
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                     }
+                });
+
+                if (isVideo) {
+                    await sock.sendMessage(chatId, {
+                        video: Buffer.from(res.data),
+                        mimetype: 'video/mp4',
+                        caption,
+                        ...global.channelInfo
+                    }, { quoted: message });
+                } else {
+                    await sock.sendMessage(chatId, {
+                        image: Buffer.from(res.data),
+                        mimetype: 'image/jpeg',
+                        caption,
+                        ...global.channelInfo
+                    }, { quoted: message });
                 }
+                delivered = true;
             }
-        } catch (errBtch) {
-            console.warn('[INSTAGRAM] BTCH tier failed, trying next tier:', errBtch.message);
-            lastError = errBtch;
+        } catch (errApi) {
+            console.warn('[INSTAGRAM] Zoxer Media API tier failed, trying ultra-igdl:', errApi.message);
+            lastError = errApi;
         }
 
-        // TIER 1.5: rahad-all-downloader-v2
+        // TIER 2: Ultra-IGDL (High-Resolution Extraction)
+        if (!delivered) {
+            try {
+                const igdlInstance = new ultraigdl();
+                const igdlRes = await igdlInstance.download(cleanUrl);
+
+                if (igdlRes && igdlRes.code === 200 && Array.isArray(igdlRes.media) && igdlRes.media.length > 0) {
+                    for (const item of igdlRes.media.slice(0, 5)) {
+                        const mediaUrl = item.url;
+                        if (mediaUrl && !isAdUrl(mediaUrl)) {
+                            const res = await axios.get(mediaUrl, {
+                                responseType: 'arraybuffer',
+                                timeout: 60000,
+                                headers: {
+                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                                }
+                            });
+
+                            const isVideo = item.type === 'video' || /\.mp4(\?|$)/i.test(mediaUrl);
+                            const caption = `📸 *Instagram Media*${igdlRes.username ? `\n👤 @${igdlRes.username}` : ''}\n\n⚡ *Downloaded by ZoxerBot*`;
+
+                            if (isVideo) {
+                                await sock.sendMessage(chatId, {
+                                    video: Buffer.from(res.data),
+                                    mimetype: 'video/mp4',
+                                    caption,
+                                    ...global.channelInfo
+                                }, { quoted: message });
+                            } else {
+                                await sock.sendMessage(chatId, {
+                                    image: Buffer.from(res.data),
+                                    mimetype: 'image/jpeg',
+                                    caption,
+                                    ...global.channelInfo
+                                }, { quoted: message });
+                            }
+                            delivered = true;
+                        }
+                    }
+                }
+            } catch (errUltra) {
+                console.warn('[INSTAGRAM] ultra-igdl tier failed, trying rahad tier:', errUltra.message);
+                lastError = errUltra;
+            }
+        }
+
+        // TIER 3: rahad-all-downloader-v2
         if (!delivered) {
             try {
                 const rahadRes = await rahad.alldl(cleanUrl);
@@ -184,48 +222,7 @@ async function instagramCommand(sock, chatId, message, rawText = '') {
             }
         }
 
-        // TIER 2: Cloudflare Workers Media API
-        if (!delivered) {
-            try {
-                const media = await fetchMediaFromApi(cleanUrl, 'video');
-                const downloadUrl = media.downloadUrl;
-
-                if (downloadUrl && !isAdUrl(downloadUrl)) {
-                    const isVideo = media.type === 'video' || /\.mp4(\?|$)/i.test(downloadUrl);
-                    const caption = `📸 *${media.title || 'Instagram Media'}*\n\n⚡ *Downloaded by ZoxerBot*`;
-
-                    const res = await axios.get(downloadUrl, {
-                        responseType: 'arraybuffer',
-                        timeout: 60000,
-                        headers: {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                        }
-                    });
-
-                    if (isVideo) {
-                        await sock.sendMessage(chatId, {
-                            video: Buffer.from(res.data),
-                            mimetype: 'video/mp4',
-                            caption,
-                            ...global.channelInfo
-                        }, { quoted: message });
-                    } else {
-                        await sock.sendMessage(chatId, {
-                            image: Buffer.from(res.data),
-                            mimetype: 'image/jpeg',
-                            caption,
-                            ...global.channelInfo
-                        }, { quoted: message });
-                    }
-                    delivered = true;
-                }
-            } catch (errApi) {
-                console.warn('[INSTAGRAM] Media API tier failed, trying yt-dlp:', errApi.message);
-                lastError = errApi;
-            }
-        }
-
-        // TIER 3: Local yt-dlp fallback
+        // TIER 4: Local yt-dlp fallback
         if (!delivered) {
             try {
                 const ytdlpResult = await fromYtDlp(targetUrl);
@@ -249,7 +246,7 @@ async function instagramCommand(sock, chatId, message, rawText = '') {
         } else {
             await sock.sendMessage(chatId, { react: { text: '❌', key: message.key } });
             await sock.sendMessage(chatId, {
-                text: `❌ *Could not download Instagram post/reel.*\n\n*Reason:* ${lastError?.message?.includes('no video') ? 'No downloadable media found.' : 'The post might be private, deleted, or temporarily restricted.'}`
+                text: `❌ *Could not download Instagram post/reel.*\n\n*Reason:* ${lastError?.message || 'The post might be private, deleted, or temporarily restricted.'}`
             }, { quoted: message });
         }
 
