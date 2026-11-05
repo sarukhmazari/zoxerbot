@@ -4,11 +4,20 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const axios = require('axios');
+const btch = require('btch-downloader');
 const { fetchMediaFromApi } = require('../lib/mediaApi');
 const { downloadMp3, downloadMp4 } = require('../lib/ytdlp-helper');
 
 // Deduplication cache to prevent concurrent spam for the same message
 const processedMessages = new Set();
+
+/**
+ * Filter out fake advertisement links returned by some free scraper endpoints
+ */
+function isAdUrl(url) {
+    if (!url || typeof url !== 'string') return true;
+    return /play\.google\.com|apps\.apple\.com|saveinsta\.app\/action|\.html(\?|$)/i.test(url);
+}
 
 /**
  * Check if a media file has an audio stream using ffprobe
@@ -40,9 +49,6 @@ function convertToMp3(inputPath, outputPath) {
                     errStr.includes('does not contain any stream') ||
                     errStr.includes('matches no streams')) {
                     return reject(new Error('The media has no audio track (it is silent or a GIF).'));
-                }
-                if (errStr.includes('not found') || errStr.includes('ENOENT')) {
-                    return reject(new Error('FFmpeg is not installed on the system.'));
                 }
                 return reject(err);
             }
@@ -144,20 +150,15 @@ async function reelsAudioCommand(sock, chatId, message, rawText = '') {
             quotedText = (
                 unwrapped?.conversation ||
                 unwrapped?.extendedTextMessage?.text ||
-                unwrapped?.videoMessage?.caption ||
-                unwrapped?.imageMessage?.caption ||
                 ''
             );
         }
 
-        // 2. Determine source: Replied Media OR Direct URL
+        // 2. Identify if user replied directly to media
         const mediaMsg = quotedMsgObj?.videoMessage || quotedMsgObj?.audioMessage || quotedMsgObj?.documentMessage;
 
-        // Check command text and quoted text for URL
-        const inputUrl = extractUrl(rawText) || extractUrl(quotedText);
-
         // CASE 1: Replied directly to video or audio message
-        if (mediaMsg && !inputUrl) {
+        if (mediaMsg) {
             await sock.sendMessage(chatId, { react: { text: '⏳', key: message.key } });
 
             const mediaBuffer = await downloadMediaMessage(
@@ -168,8 +169,9 @@ async function reelsAudioCommand(sock, chatId, message, rawText = '') {
             );
 
             if (!mediaBuffer || mediaBuffer.length === 0) {
+                await sock.sendMessage(chatId, { react: { text: '❌', key: message.key } });
                 return await sock.sendMessage(chatId, {
-                    text: '❌ Could not download the replied media. Please ensure the message is fully loaded.'
+                    text: '❌ Could not download the replied media. Please ensure the media is fully loaded in WhatsApp.'
                 }, { quoted: message });
             }
 
@@ -192,7 +194,7 @@ async function reelsAudioCommand(sock, chatId, message, rawText = '') {
             if (!hasAudio) {
                 await sock.sendMessage(chatId, { react: { text: '⚠️', key: message.key } });
                 return await sock.sendMessage(chatId, {
-                    text: '⚠️ The replied video has *no audio track* (it is silent or a GIF). Please reply to a video with sound.'
+                    text: '⚠️ The replied video has *no audio track* (it is a silent video or GIF). Please reply to a video with sound.'
                 }, { quoted: message });
             }
 
@@ -212,9 +214,15 @@ async function reelsAudioCommand(sock, chatId, message, rawText = '') {
             return;
         }
 
+        // Check command text and quoted text for URL
+        const inputUrl = extractUrl(rawText) || extractUrl(quotedText);
+
         // CASE 2: URL provided (in command argument or replied message text)
         if (inputUrl) {
             await sock.sendMessage(chatId, { react: { text: '🎵', key: message.key } });
+
+            const cleanUrl = inputUrl.split('?')[0].replace(/\/+$/, '') + '/';
+            const isInstagram = /instagram\.com|instagr\.am/i.test(inputUrl);
 
             const id = crypto.randomBytes(6).toString('hex');
             const tempOutput = path.join(tempDir, `reels_audio_${id}.mp3`);
@@ -222,24 +230,73 @@ async function reelsAudioCommand(sock, chatId, message, rawText = '') {
 
             let audioExtracted = false;
             let title = 'Reels Audio';
+            let isPhotoPostOnly = false;
 
-            // Tier 1: Try Cloudflare Workers Media API audio extraction
-            try {
-                const media = await fetchMediaFromApi(inputUrl, 'audio');
-                if (media?.downloadUrl) {
-                    title = media.title || 'Reels Audio';
-                    const tempRaw = path.join(tempDir, `raw_audio_${id}`);
-                    filesToClean.push(tempRaw);
+            // Tier 1: Check Instagram scraper first if it's an IG link (detects photos vs videos instantly)
+            if (isInstagram) {
+                try {
+                    const btchRes = await btch.igdl(cleanUrl);
+                    if (btchRes?.status && Array.isArray(btchRes.result) && btchRes.result.length > 0) {
+                        const item = btchRes.result[0];
+                        const downloadUrl = item.url;
 
-                    await downloadToFile(media.downloadUrl, tempRaw);
-                    await convertToMp3(tempRaw, tempOutput);
-                    audioExtracted = true;
+                        if (downloadUrl && !isAdUrl(downloadUrl)) {
+                            // Check headers to see if it's an image or video
+                            const headRes = await axios.get(downloadUrl, {
+                                responseType: 'stream',
+                                timeout: 15000,
+                                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+                            });
+
+                            const disposition = headRes.headers['content-disposition'] || '';
+                            const contentType = headRes.headers['content-type'] || '';
+                            const isImage = /\.(jpe?g|png|webp)/i.test(disposition) || contentType.startsWith('image/');
+
+                            headRes.data.destroy(); // Close stream
+
+                            if (isImage) {
+                                isPhotoPostOnly = true;
+                            } else {
+                                // It is a video! Download and convert to MP3
+                                const tempVid = path.join(tempDir, `reels_btch_${id}.mp4`);
+                                filesToClean.push(tempVid);
+                                await downloadToFile(downloadUrl, tempVid);
+                                await convertToMp3(tempVid, tempOutput);
+                                audioExtracted = true;
+                            }
+                        }
+                    }
+                } catch (errBtch) {
+                    console.warn('[REELSAUDIO] IG scraper tier skipped:', errBtch.message);
                 }
-            } catch (errApi) {
-                console.warn('[REELSAUDIO] Media API audio route failed, falling back to yt-dlp:', errApi.message);
             }
 
-            // Tier 2: Try yt-dlp downloadMp3
+            if (isPhotoPostOnly) {
+                await sock.sendMessage(chatId, { react: { text: '⚠️', key: message.key } });
+                return await sock.sendMessage(chatId, {
+                    text: '⚠️ *No Audio Track Found!*\n\nThis Instagram post is an *image/photo*, not a video or Reel with sound.\n\n*Tip:* Please provide a link to an Instagram Reel or TikTok video, or reply directly to a video message!'
+                }, { quoted: message });
+            }
+
+            // Tier 2: Try Cloudflare Workers Media API audio extraction
+            if (!audioExtracted) {
+                try {
+                    const media = await fetchMediaFromApi(inputUrl, 'audio');
+                    if (media?.downloadUrl && !isAdUrl(media.downloadUrl)) {
+                        title = media.title || 'Reels Audio';
+                        const tempRaw = path.join(tempDir, `raw_audio_${id}`);
+                        filesToClean.push(tempRaw);
+
+                        await downloadToFile(media.downloadUrl, tempRaw);
+                        await convertToMp3(tempRaw, tempOutput);
+                        audioExtracted = true;
+                    }
+                } catch (errApi) {
+                    console.warn('[REELSAUDIO] Media API audio route skipped:', errApi.message);
+                }
+            }
+
+            // Tier 3: Try yt-dlp downloadMp3
             if (!audioExtracted) {
                 try {
                     const ytdlpFile = await downloadMp3(inputUrl, `reels_ytdlp_${id}`);
@@ -249,15 +306,22 @@ async function reelsAudioCommand(sock, chatId, message, rawText = '') {
                         audioExtracted = true;
                     }
                 } catch (errYtdlp) {
-                    console.warn('[REELSAUDIO] yt-dlp MP3 download failed, falling back to video extraction:', errYtdlp.message);
+                    const msg = errYtdlp.message || '';
+                    if (msg.includes('There is no video in this post')) {
+                        await sock.sendMessage(chatId, { react: { text: '⚠️', key: message.key } });
+                        return await sock.sendMessage(chatId, {
+                            text: '⚠️ *No Audio Track Found!*\n\nThis post contains photos only (no video or audio). Please provide a Reel or TikTok video.'
+                        }, { quoted: message });
+                    }
+                    console.warn('[REELSAUDIO] yt-dlp MP3 download skipped:', msg);
                 }
             }
 
-            // Tier 3: Fetch video stream and convert via FFmpeg
+            // Tier 4: Fetch video stream and convert via FFmpeg
             if (!audioExtracted) {
                 try {
                     const mediaVideo = await fetchMediaFromApi(inputUrl, 'video');
-                    if (mediaVideo?.downloadUrl) {
+                    if (mediaVideo?.downloadUrl && !isAdUrl(mediaVideo.downloadUrl)) {
                         title = mediaVideo.title || title;
                         const tempVideo = path.join(tempDir, `reels_video_${id}.mp4`);
                         filesToClean.push(tempVideo);
@@ -267,11 +331,11 @@ async function reelsAudioCommand(sock, chatId, message, rawText = '') {
                         audioExtracted = true;
                     }
                 } catch (errVideoApi) {
-                    console.warn('[REELSAUDIO] Video stream extraction failed:', errVideoApi.message);
+                    console.warn('[REELSAUDIO] Video stream extraction skipped:', errVideoApi.message);
                 }
             }
 
-            // Tier 4: Last resort - yt-dlp MP4 download then FFmpeg convert
+            // Tier 5: yt-dlp MP4 download then FFmpeg convert
             if (!audioExtracted) {
                 try {
                     const mp4File = await downloadMp4(inputUrl, `reels_ytdlp_vid_${id}`);
@@ -281,14 +345,14 @@ async function reelsAudioCommand(sock, chatId, message, rawText = '') {
                         audioExtracted = true;
                     }
                 } catch (errLast) {
-                    console.error('[REELSAUDIO] All extraction tiers failed:', errLast.message);
+                    console.error('[REELSAUDIO] All extraction tiers finished without success:', errLast.message);
                 }
             }
 
             if (!audioExtracted || !fs.existsSync(tempOutput)) {
                 await sock.sendMessage(chatId, { react: { text: '❌', key: message.key } });
                 return await sock.sendMessage(chatId, {
-                    text: '❌ *Failed to extract audio from link.*\n\nPlease verify that the Reel/TikTok is public and accessible, or download the video and reply to it directly with *.reelsaudio*.'
+                    text: '❌ *Failed to extract audio from link.*\n\nPlease verify that the Reel/TikTok is public and accessible, or download the video and reply directly to it with *.reelsaudio*.'
                 }, { quoted: message });
             }
 
@@ -314,11 +378,12 @@ async function reelsAudioCommand(sock, chatId, message, rawText = '') {
                   `*How to use:*\n` +
                   `1️⃣ *Reply to any Reel/TikTok video* in this chat with:\n` +
                   `   • *.reelsaudio*\n` +
-                  `   • *.extractaudio*\n\n` +
+                  `   • *.extractaudio*\n` +
+                  `   • *.reelsmp3*\n\n` +
                   `2️⃣ *Or provide a direct link:*\n` +
                   `   • *.reelsaudio https://www.instagram.com/reel/...*\n` +
                   `   • *.reelsaudio https://vt.tiktok.com/...*\n\n` +
-                  `*Aliases:* \`.reelsaudio\`, \`.extractaudio\`, \`.reelsmp3\`, \`.reelaudio\``,
+                  `*Aliases:* \`.reelsaudio\`, \`.extractaudio\`, \`.reelsmp3\`, \`.reelmp3\`, \`.reelaudio\``,
             ...global.channelInfo
         }, { quoted: message });
 

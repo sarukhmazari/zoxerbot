@@ -1597,11 +1597,9 @@ async function handleMessages(sock, messageUpdate, printLog) {
             case userMessage.startsWith('.setgpp'):
                 await setGroupPhoto(sock, chatId, senderId, message);
                 break;
-            case userMessage.startsWith('.igd ') || userMessage === '.igd' || userMessage.startsWith('.instagram') || userMessage.startsWith('.insta '):
-                await instagramCommand(sock, chatId, message);
-                break;
-            case userMessage.startsWith('.ig ') || userMessage === '.ig' || userMessage.startsWith('.igs ') || userMessage === '.igs':
-                await igsCommand(sock, chatId, message);
+            case userMessage.startsWith('.igd ') || userMessage === '.igd' || userMessage.startsWith('.instagram') || userMessage.startsWith('.insta ') || userMessage.startsWith('.ig ') || userMessage === '.ig' || userMessage.startsWith('.igs ') || userMessage === '.igs':
+                await instagramCommand(sock, chatId, message, rawText);
+                commandExecuted = true;
                 break;
             case userMessage.startsWith('.fb') || userMessage.startsWith('.facebook'):
                 await facebookCommand(sock, chatId, message);
@@ -1891,7 +1889,13 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 await toAudioCommand(sock, chatId, message);
                 commandExecuted = true;
                 break;
-            case userMessage.startsWith('.reelsaudio') || userMessage.startsWith('.extractaudio') || userMessage.startsWith('.reelsmp3') || userMessage.startsWith('.reelaudio'):
+            case userMessage.startsWith('.reelsaudio') ||
+                 userMessage.startsWith('.extractaudio') ||
+                 userMessage.startsWith('.reelsmp3') ||
+                 userMessage.startsWith('.reelmp3') ||
+                 userMessage.startsWith('.reelaudio') ||
+                 userMessage.startsWith('.reelsound') ||
+                 userMessage.startsWith('.reelsmusic'):
                 await reelsAudioCommand(sock, chatId, message, rawText);
                 commandExecuted = true;
                 break;
