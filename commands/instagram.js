@@ -4,6 +4,7 @@ const path = require('path');
 const os = require('os');
 const { execFile } = require('child_process');
 const btch = require('btch-downloader');
+const rahad = require('rahad-all-downloader-v2');
 const { fetchMediaFromApi } = require('../lib/mediaApi');
 
 // Prevent rapid duplicate requests
@@ -139,8 +140,48 @@ async function instagramCommand(sock, chatId, message, rawText = '') {
                 }
             }
         } catch (errBtch) {
-            console.warn('[INSTAGRAM] BTCH tier failed, trying Cloudflare API:', errBtch.message);
+            console.warn('[INSTAGRAM] BTCH tier failed, trying next tier:', errBtch.message);
             lastError = errBtch;
+        }
+
+        // TIER 1.5: rahad-all-downloader-v2
+        if (!delivered) {
+            try {
+                const rahadRes = await rahad.alldl(cleanUrl);
+                const mediaUrl = rahadRes?.data?.download?.url || rahadRes?.result?.video?.url || rahadRes?.data?.videoUrl;
+                const mediaType = rahadRes?.data?.download?.type || rahadRes?.result?.video?.type;
+
+                if (mediaUrl && !isAdUrl(mediaUrl)) {
+                    const res = await axios.get(mediaUrl, {
+                        responseType: 'arraybuffer',
+                        timeout: 60000,
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                        }
+                    });
+
+                    const caption = `📸 *Instagram Media*\n\n⚡ *Downloaded by ZoxerBot*`;
+                    if (mediaType === 'image' || (!mediaType && String(res.headers['content-type']).includes('image'))) {
+                        await sock.sendMessage(chatId, {
+                            image: Buffer.from(res.data),
+                            mimetype: 'image/jpeg',
+                            caption,
+                            ...global.channelInfo
+                        }, { quoted: message });
+                    } else {
+                        await sock.sendMessage(chatId, {
+                            video: Buffer.from(res.data),
+                            mimetype: 'video/mp4',
+                            caption,
+                            ...global.channelInfo
+                        }, { quoted: message });
+                    }
+                    delivered = true;
+                }
+            } catch (errRahad) {
+                console.warn('[INSTAGRAM] rahad tier failed:', errRahad.message);
+                lastError = errRahad;
+            }
         }
 
         // TIER 2: Cloudflare Workers Media API
