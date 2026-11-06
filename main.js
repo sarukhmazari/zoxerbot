@@ -189,6 +189,7 @@ const { demoteCommand } = require('./commands/demote');
 const muteCommand = require('./commands/mute');
 const unmuteCommand = require('./commands/unmute');
 const stickerCommand = require('./commands/sticker');
+const emojimixCommand = require('./commands/emojimix');
 const isAdmin = require('./lib/isAdmin');
 const warnCommand = require('./commands/warn');
 const warningsCommand = require('./commands/warnings');
@@ -314,6 +315,7 @@ const toAudioCommand = require('./commands/toaudio');
 const reelsAudioCommand = require('./commands/reelsaudio');
 const toVideoCommand = require('./commands/tovideo');
 const toPttCommand = require('./commands/toptt');
+const robotCommand = require('./commands/robot');
 const qrcodeCommand = require('./commands/qrcode');
 const scanqrCommand = require('./commands/scanqr');
 const { invertCommand, rotateCommand } = require('./commands/imageedit');
@@ -1014,6 +1016,12 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 await stickerCommand(sock, chatId, message);
                 commandExecuted = true;
                 break;
+            case (userMessage.startsWith('.emojimix') || userMessage.startsWith('.emix') || userMessage.startsWith('.mixemoji')): {
+                const emojimixText = rawText.replace(/^\.(emojimix|emix|mixemoji)\s*/i, '').trim();
+                await emojimixCommand(sock, chatId, emojimixText, message);
+                commandExecuted = true;
+                break;
+            }
             case userMessage.startsWith('.warnings'):
                 const mentionedJidListWarnings = message.message.extendedTextMessage?.contextInfo?.mentionedJid || [];
                 await warningsCommand(sock, chatId, mentionedJidListWarnings);
@@ -1905,6 +1913,10 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 break;
             case userMessage === '.toptt' || userMessage === '.vn':
                 await toPttCommand(sock, chatId, message);
+                commandExecuted = true;
+                break;
+            case userMessage === '.robot' || userMessage.startsWith('.robot '):
+                await robotCommand(sock, chatId, message);
                 commandExecuted = true;
                 break;
             case userMessage.startsWith('.scanqr') || userMessage.startsWith('.readqr') || userMessage.startsWith('.qrscan') || userMessage.startsWith('.qrread'):

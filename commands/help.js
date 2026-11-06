@@ -16,6 +16,7 @@ const commandCatalog = {
     'topmembers': { category: 'Core', desc: 'View leaderboard of most active group participants.', usage: '.topmembers' },
     'time': { category: 'Core', desc: 'Check current time and timezone for any global city.', usage: '.time [city/country]' },
     'sticker': { category: 'Media', desc: 'Convert replied image or video into a WebP sticker.', usage: '.sticker or .s' },
+    'emojimix': { category: 'Media', desc: 'Merge two emojis into a Google Emoji Kitchen sticker.', usage: '.emojimix <emoji1>+<emoji2>' },
     'crop': { category: 'Media', desc: 'Crop replied image or video into a 1:1 square sticker.', usage: '.crop' },
     'take': { category: 'Media', desc: 'Change sticker pack name and author EXIF metadata.', usage: '.take [pack] | [author]' },
     'simage': { category: 'Media', desc: 'Convert replied sticker back into an image photo.', usage: '.simage' },
@@ -28,6 +29,7 @@ const commandCatalog = {
     'reelsaudio': { category: 'Media', desc: 'Extract trending audio from Instagram Reel, TikTok, or replied video.', usage: '.reelsaudio [url or reply to video]' },
     'tovideo': { category: 'Media', desc: 'Convert replied animated sticker or GIF into playable MP4.', usage: '.tovideo or .mp4' },
     'toptt': { category: 'Media', desc: 'Convert replied audio file into a native WhatsApp voice note.', usage: '.toptt or .vn' },
+    'robot': { category: 'Media', desc: 'Modulate voice note or audio with a futuristic robotic synthesizer.', usage: '.robot (reply to audio)' },
     'qr': { category: 'Media', desc: 'Generate a scannable QR code image from given text or URL.', usage: '.qr [text/url]' },
     'blur': { category: 'Media', desc: 'Blur replied photo image.', usage: '.blur' },
     'remini': { category: 'Media', desc: 'Enhance photo resolution and clarity using AI.', usage: '.remini or .enhance' },
@@ -213,6 +215,7 @@ async function helpCommand(sock, chatId, message, customChannelLink) {
             `╰──────────────\n\n` +
             `╭─〔 ▣ 𝗠𝗘𝗗𝗜𝗔 〕\n` +
             `│  *.sticker* 〔*.s*〕\n` +
+            `│  *.emojimix <e1>+<e2>* 〔*.emix*〕\n` +
             `│  *.crop*\n` +
             `│  *.take <pack> | <author>* 〔*.steal*〕\n` +
             `│  *.simage*\n` +
@@ -221,6 +224,7 @@ async function helpCommand(sock, chatId, message, customChannelLink) {
             `│  *.tovideo* 〔*.mp4*〕\n` +
             `│  *.drama <name/ep>*\n` +
             `│  *.toptt* 〔*.vn*〕\n` +
+            `│  *.robot* 〔reply to audio〕\n` +
             `│  *.qr <text/url>* 〔*.qrcode*〕\n` +
             `│  *.scanqr* 〔*.readqr*〕\n` +
             `│  *.blur*\n` +

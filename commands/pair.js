@@ -79,8 +79,8 @@ async function pairCommand(sock, chatId, message, args = []) {
         }
 
         if (realCode) {
-            const formattedMsg = 
-`┏━━〔 *PAIRING CODE* 〕━━┓
+            const formattedMsg =
+                `┏━━〔 *PAIRING CODE* 〕━━┓
 ┃ 📱 *Number:* +${phoneNumber}
 ┃ 🔑 *Code:* *${realCode}*
 ┗━━━━━━━━━━━━━━━━━┛

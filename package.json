@@ -33,6 +33,7 @@
     "cheerio": "^1.0.0-rc.12",
     "cors": "^2.8.6",
     "dotenv": "^16.4.5",
+    "emoji-mixer": "^2.2.1",
     "express": "^5.2.1",
     "file-type": "^16.5.4",
     "fluent-ffmpeg": "^2.1.3",
