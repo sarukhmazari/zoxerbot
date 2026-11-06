@@ -1,3 +1,6 @@
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
+
 const settings = {
   packname: process.env.BOT_PACKNAME || 'ZOXER BOT',
   author: process.env.BOT_AUTHOR || 'ZOXER TEAM',
@@ -20,7 +23,8 @@ const settings = {
     '120363404139113188@newsletter'
   ],
   knightBotApiKey: process.env.KNIGHTBOT_API_KEY || 'knight',
-  zoxerMediaApiUrl: process.env.ZOXER_MEDIA_API_URL || 'https://zoxer-media-api.sarukhmazari1.workers.dev',
+  mediaEngineApiUrl: process.env.MEDIA_ENGINE_API_URL || 'http://3.106.186.133:5050',
+  zoxerMediaApiUrl: process.env.ZOXER_MEDIA_API_URL || 'http://3.106.186.133:5050',
   zoxerMediaApiKey: process.env.ZOXER_MEDIA_API_KEY || 'zoxer_e4b5054d63fc1ed506cdafc9be5c858410b5f17e97a8a5da'
 };
 

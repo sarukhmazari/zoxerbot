@@ -4,6 +4,7 @@ const axios = require('axios');
 const yts = require('yt-search');
 const btch = require('btch-downloader');
 const { downloadMp4, getYtDlpMeta, getCookiesPath, tmpDir } = require('../lib/ytdlp-helper');
+const { fetchMediaFromApi } = require('../lib/mediaApi');
 
 let settings = null;
 try {
@@ -60,30 +61,20 @@ async function resolveVideo(input) {
 
     targetUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
-    // 1. Cloudflare Worker Edge API
+    // 1. Zoxer Media API (Cloudflare with Local Engine Failover)
     try {
-        const res = await axios.post(`${API_BASE}/api/v1/download`, {
-            url: targetUrl,
-            format: 'video'
-        }, {
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${API_KEY}`
-            },
-            timeout: 15000
-        });
-
-        if (res.data?.success && res.data?.data?.media?.download_url) {
+        const media = await fetchMediaFromApi(targetUrl, 'video');
+        if (media && media.downloadUrl) {
             return {
-                downloadUrl: res.data.data.media.download_url,
-                title: res.data.data.title || title,
-                author: res.data.data.author?.name || author,
-                thumbnail: res.data.data.thumbnail || thumbnail,
+                downloadUrl: media.downloadUrl,
+                title: media.title || title,
+                author: media.author || author,
+                thumbnail: media.thumbnail || thumbnail,
                 targetUrl
             };
         }
     } catch (cfErr) {
-        console.warn('[VIDEO] Cloudflare Worker failed, trying next method:', cfErr.response?.data?.error?.message || cfErr.message);
+        console.warn('[VIDEO] Media API failed, trying yt-dlp fallback:', cfErr.message);
     }
 
     return {
