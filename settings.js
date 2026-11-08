@@ -9,6 +9,7 @@ const settings = {
   ownerNumber: process.env.OWNER_NUMBER || '923232391033', // Pakistan number format without + symbol
   ownerNumbers: (process.env.OWNER_NUMBERS || '923232391033,923292823218,923252025304,12224080949405').split(','), // Multiple owners array (comma separated, e.g., '923232391033,923232391034')
   giphyApiKey: process.env.GIPHY_API_KEY || 'qnl7ssQChTdPjsKta2Ax2LMaGXz303tq',
+  geminiApiKey: process.env.GEMINI_API_KEY || '',
   commandMode: process.env.BOT_MODE || "private",
   maxStoreMessages: parseInt(process.env.MAX_STORE_MESSAGES || '20'),
   storeWriteInterval: parseInt(process.env.STORE_WRITE_INTERVAL || '10000'),

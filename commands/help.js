@@ -147,7 +147,8 @@ const commandCatalog = {
     'autojoinlinks': { category: 'Owner Control', desc: 'Toggle automatic WhatsApp group link detection and joining.', usage: '.autojoinlinks on / off / status' },
     'anticall': { category: 'Owner Control', desc: 'Toggle auto reject voice and video calls.', usage: '.anticall on / off' },
     'pmblocker': { category: 'Owner Control', desc: 'Block incoming private DMs.', usage: '.pmblocker on / off' },
-    'smartreply': { category: 'Owner Control', desc: 'Toggle automatic greeting responses.', usage: '.smartreply on / off' },
+    'smartreply': { category: 'Owner Control', desc: 'Toggle Gemini AI-powered automatic message replies.', usage: '.smartreply on / off / status / reset' },
+    'autoreply': { category: 'Owner Control', desc: 'Alias for .smartreply Gemini AI automatic replies.', usage: '.autoreply on / off' },
     'waifu': { category: 'Anime & Manga', desc: 'Fetch a random high quality anime waifu image.', usage: '.waifu' },
     'neko': { category: 'Anime & Manga', desc: 'Fetch a cute catgirl anime picture.', usage: '.neko' },
     'kitsune': { category: 'Anime & Manga', desc: 'Fetch a foxgirl anime picture.', usage: '.kitsune' },
@@ -406,4 +407,5 @@ async function helpCommand(sock, chatId, message, customChannelLink) {
     }
 }
 
+helpCommand.commandCatalog = commandCatalog;
 module.exports = helpCommand;

@@ -310,7 +310,7 @@ const antispamCommand = require('./commands/antispam');
 const pcustomeCommand = require('./commands/pcustome');
 const { handleSpamDetection, isUserIgnored } = require('./lib/spamTracker');
 const { handleAntispamDetection } = require('./lib/antispamTracker');
-const { smartreplyCommand, getSmartReplyStatus } = require('./commands/smartreply');
+const { smartreplyCommand, getSmartReplyStatus, handleSmartReplyMessage } = require('./commands/smartreply');
 const toAudioCommand = require('./commands/toaudio');
 const reelsAudioCommand = require('./commands/reelsaudio');
 const toVideoCommand = require('./commands/tovideo');
@@ -441,62 +441,12 @@ function isGreetingMessage(text) {
 }
 
 /**
- * Handle Smart Auto-Replies for greetings
+ * Handle Smart Auto-Replies with Gemini AI
  */
-async function handleSmartReplies(sock, chatId, message, userMessage, senderId) {
+async function handleSmartReplies(sock, chatId, message, userMessage, senderId, isGroup) {
     try {
-        // Get user-specific status
-        const userJid = message.key.participant || message.key.remoteJid;
-
-        // ⚠️ STRICT MODE CHECK - MUST BE AT THE VERY TOP ⚠️
-        const isSmartReplyEnabled = getSmartReplyStatus();
-
-        // EARLY EXIT: If smartreply is OFF, STOP immediately - no further processing
-        if (!isSmartReplyEnabled) {
-            return false; // HARD STOP - do not proceed
-        }
-
-        // At this point, we KNOW smartreply is ON - safe to proceed
-        // 🛠️ Optimization: Reduced logging to only critical hits
-        // console.log('✅ SmartReply is ON for', userJid);
-
-        // Don't reply to bot's own messages
-        if (message.key.fromMe) {
-            return false;
-        }
-
-        if (!userMessage || userMessage.length > 100) {
-            return false;
-        }
-
-        // Detect greeting message using fuzzy matching
-        const greetingCategory = isGreetingMessage(userMessage);
-
-        if (!greetingCategory) {
-            return false;
-        }
-
-        // Anti-spam cooldown (20 seconds per user per chat)
-        const cooldownKey = `${chatId}-${userJid}`;
-        const now = Date.now();
-
-        if (globalSmartReplyCooldowns.has(cooldownKey)) {
-            const lastReplyTime = globalSmartReplyCooldowns.get(cooldownKey);
-            if (now - lastReplyTime < 20000) {
-                return false; // Still in cooldown
-            }
-        }
-
-        // Get random response from appropriate category
-        const response = getRandomReply(greetingCategory);
-
-        if (response) {
-            globalSmartReplyCooldowns.set(cooldownKey, now);
-            await sock.sendMessage(chatId, { text: response }, { quoted: message });
-            return true;
-        }
-
-        return false;
+        if (!getSmartReplyStatus()) return false;
+        return await handleSmartReplyMessage(sock, chatId, message, userMessage, senderId, isGroup);
     } catch (err) {
         console.error('SmartReply error:', err.message);
         return false;
@@ -791,9 +741,9 @@ async function handleMessages(sock, messageUpdate, printLog) {
             await handleAfkMentions(sock, chatId, message);
         }
 
-        // 💬 Handle Smart Auto-Replies for greetings
+        // 💬 Handle Smart Auto-Replies with Gemini AI
         if (!message.key.fromMe && userMessage) {
-            const replied = await handleSmartReplies(sock, chatId, message, userMessage, senderId);
+            const replied = await handleSmartReplies(sock, chatId, message, rawText || userMessage, senderId, isGroup);
             if (replied) return; // Silent return if auto-replied
         }
 
@@ -852,7 +802,7 @@ async function handleMessages(sock, messageUpdate, printLog) {
         const isAdminCommand = adminCommands.some(cmd => userMessage.startsWith(cmd)) && !isAddLink;
 
         // List of owner commands
-        const ownerCommands = ['.mode', '.stealth', '.smartreply', '.autostatus', '.antidelete', '.cleartmp', '.setpp', '.clearsession', '.areact', '.autoreact', '.autotyping', '.autoread', '.autojoinlinks', '.pmblocker', '.setmenudp', '.setdp', '.setmenumusic', '.setmusic', '.setdpd', '.setdpdefault', '.restart', '.reboot', '.broadcast', '.bc', '.block', '.unblock', '.setname', '.setbio', '.setabout'];
+        const ownerCommands = ['.mode', '.stealth', '.smartreply', '.autoreply', '.autostatus', '.antidelete', '.cleartmp', '.setpp', '.clearsession', '.areact', '.autoreact', '.autotyping', '.autoread', '.autojoinlinks', '.pmblocker', '.setmenudp', '.setdp', '.setmenumusic', '.setmusic', '.setdpd', '.setdpdefault', '.restart', '.reboot', '.broadcast', '.bc', '.block', '.unblock', '.setname', '.setbio', '.setabout'];
         const isOwnerCommand = ownerCommands.some(cmd => userMessage.startsWith(cmd));
 
         let isSenderAdmin = false;
@@ -1819,7 +1769,7 @@ async function handleMessages(sock, messageUpdate, printLog) {
                     await animeCommand(sock, chatId, message, [sub]);
                 }
                 break;
-            case userMessage.startsWith('.smartreply'):
+            case userMessage.startsWith('.smartreply') || userMessage.startsWith('.autoreply'):
                 {
                     const args = userMessage.split(/\s+/).slice(1);
                     await smartreplyCommand(sock, chatId, message, args, senderId, isGroup);
