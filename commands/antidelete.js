@@ -191,27 +191,7 @@ async function storeMessage(sock, message) {
             timestamp: new Date().toISOString()
         });
 
-        // Anti-ViewOnce: forward immediately to owner if captured
-        if (isViewOnce && mediaType && fs.existsSync(mediaPath)) {
-            try {
-                const ownerNumber = sock.user.id.split(':')[0] + '@s.whatsapp.net';
-                const senderName = sender.split('@')[0];
-                const mediaOptions = {
-                    caption: `*Anti-ViewOnce ${mediaType}*
-From: @${senderName}`,
-                    mentions: [sender]
-                };
-                if (mediaType === 'image') {
-                    await sock.sendMessage(ownerNumber, { image: { url: mediaPath }, ...mediaOptions });
-                } else if (mediaType === 'video') {
-                    await sock.sendMessage(ownerNumber, { video: { url: mediaPath }, ...mediaOptions });
-                }
-                // Cleanup immediately for view-once forward
-                try { fs.unlinkSync(mediaPath); } catch {}
-            } catch (e) {
-                // ignore
-            }
-        }
+        // View-Once messages are retained in store for antidelete revocation recovery
 
     } catch (err) {
         console.error('storeMessage error:', err);

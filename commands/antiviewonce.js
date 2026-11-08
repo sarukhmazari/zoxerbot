@@ -7,13 +7,13 @@ const isAdmin = require('../lib/isAdmin');
 
 const dataFilePath = path.join(__dirname, '../data/antiviewonce.json');
 
-// In-memory config: { dm: boolean, allGroups: boolean, recipient: string, groups: { [groupId]: { enabled: boolean, recipient: string } } }
+// In-memory config: { dm: boolean, allGroups: boolean, recipient: string|null, groups: { [groupId]: { enabled: boolean, recipient: string|null } } }
 let avoConfig = { dm: false, allGroups: false, recipient: null, groups: {} };
 const processedViewOnceIds = new Set();
 const MAX_PROCESSED_IDS = 1000;
 
 /**
- * Normalizes JIDs safely, preserving @lid, @g.us, and @newsletter identities.
+ * Normalizes JIDs safely, stripping device suffixes (:device_id) to avoid send failures.
  */
 function cleanJid(jid) {
     if (!jid || typeof jid !== 'string') return '';
@@ -86,23 +86,36 @@ function isChatEnabled(chatId) {
 }
 
 /**
- * Structured diagnostic logger for authorized testing.
- * Avoids logging sensitive message contents, auth credentials, or media keys.
+ * Resolves the destination owner/admin private chat JID.
+ * Strips device suffixes (:device_id) to prevent Baileys delivery failures.
  */
-function logDiagnostic(data) {
-    const timestamp = new Date().toISOString();
-    const parts = [
-        `[AVO-DIAG ${timestamp}]`,
-        `event: ${data.event || 'message'}`,
-        `chatType: ${data.chatType || 'unknown'}`,
-        `msgType: ${data.messageType || 'none'}`,
-        `wrappers: ${data.wrappers || 'none'}`,
-        `detection: ${data.detectionResult || 'none'}`,
-        `config: ${data.configStatus || 'unknown'}`
-    ];
-    if (data.details) parts.push(`details: ${data.details}`);
-    if (data.error) parts.push(`error: ${data.error}`);
-    console.log(parts.join(' | '));
+function resolveOwnerRecipient(sock, chatId) {
+    // 1. Group-specific configured recipient
+    const groupRecipient = chatId && avoConfig.groups?.[chatId]?.recipient;
+    if (groupRecipient) {
+        const cleaned = cleanJid(groupRecipient);
+        if (cleaned && !cleaned.endsWith('@g.us')) return cleaned;
+    }
+
+    // 2. Global configured recipient
+    if (avoConfig.recipient) {
+        const cleaned = cleanJid(avoConfig.recipient);
+        if (cleaned && !cleaned.endsWith('@g.us')) return cleaned;
+    }
+
+    // 3. Connected bot session user ID
+    if (sock?.user?.id) {
+        const botUser = cleanJid(sock.user.id);
+        if (botUser && !botUser.endsWith('@g.us')) return botUser;
+    }
+
+    // 4. Default bot owner number from settings
+    const ownerNum = settings.ownerNumber || (Array.isArray(settings.ownerNumbers) ? settings.ownerNumbers[0] : null);
+    if (ownerNum) {
+        return cleanJid(ownerNum);
+    }
+
+    return null;
 }
 
 /**
@@ -114,7 +127,7 @@ function unwrapMessage(message) {
 
     let current = message.message || message;
     const wrappers = [];
-    const maxDepth = 10;
+    const maxDepth = 12;
     let depth = 0;
 
     while (current && typeof current === 'object' && depth < maxDepth) {
@@ -153,6 +166,9 @@ function unwrapMessage(message) {
         } else if (current.groupStatusMessageV2?.message) {
             wrappers.push('groupStatusMessageV2');
             current = current.groupStatusMessageV2.message;
+        } else if (current.message && typeof current.message === 'object' && !current.imageMessage && !current.videoMessage && !current.audioMessage && !current.documentMessage && !current.ptvMessage) {
+            wrappers.push('message');
+            current = current.message;
         } else {
             break;
         }
@@ -196,6 +212,13 @@ function findViewOnceMedia(message) {
             mimeType = content.videoMessage.mimetype || 'video/mp4';
             caption = content.videoMessage.caption || '';
         }
+    } else if (content.ptvMessage) {
+        if (hasViewOnceWrapper || content.ptvMessage.viewOnce || content.ptvMessage.viewOnceMessage) {
+            mediaContent = content.ptvMessage;
+            mediaType = 'video';
+            mimeType = content.ptvMessage.mimetype || 'video/mp4';
+            caption = content.ptvMessage.caption || '';
+        }
     } else if (content.audioMessage) {
         if (hasViewOnceWrapper || content.audioMessage.viewOnce || content.audioMessage.viewOnceMessage) {
             mediaContent = content.audioMessage;
@@ -223,57 +246,6 @@ function findViewOnceMedia(message) {
         caption,
         isViewOnce: true,
         wrapperStructure: wrappers.length > 0 ? wrappers.join(' -> ') : 'direct'
-    };
-}
-
-/**
- * Inspects a message for any media type (View-Once or normal media).
- * Used by diagnostic logging and authorized testing workflows.
- */
-function inspectMediaMessage(message) {
-    if (!message) return null;
-
-    const vOnce = findViewOnceMedia(message);
-    if (vOnce) return vOnce;
-
-    const { content, wrappers } = unwrapMessage(message);
-    if (!content || typeof content !== 'object') return null;
-
-    let mediaContent = null;
-    let mediaType = null;
-    let mimeType = null;
-    let caption = '';
-
-    if (content.imageMessage) {
-        mediaContent = content.imageMessage;
-        mediaType = 'image';
-        mimeType = content.imageMessage.mimetype || 'image/jpeg';
-        caption = content.imageMessage.caption || '';
-    } else if (content.videoMessage) {
-        mediaContent = content.videoMessage;
-        mediaType = 'video';
-        mimeType = content.videoMessage.mimetype || 'video/mp4';
-        caption = content.videoMessage.caption || '';
-    } else if (content.audioMessage) {
-        mediaContent = content.audioMessage;
-        mediaType = 'audio';
-        mimeType = content.audioMessage.mimetype || 'audio/ogg; codecs=opus';
-    } else if (content.documentMessage) {
-        mediaContent = content.documentMessage;
-        mediaType = 'document';
-        mimeType = content.documentMessage.mimetype || 'application/octet-stream';
-        caption = content.documentMessage.caption || content.documentMessage.fileName || '';
-    }
-
-    if (!mediaContent) return null;
-
-    return {
-        mediaContent,
-        mediaType,
-        mimeType,
-        caption,
-        isViewOnce: false,
-        wrapperStructure: wrappers.length > 0 ? wrappers.join(' -> ') : 'normal'
     };
 }
 
@@ -335,9 +307,9 @@ async function antiviewonceCommand(sock, chatId, senderId, args, message) {
                   `┃  ◈ *STATUS:* ✅ Enabled\n` +
                   `┃  ◈ *SCOPE:* ${scopeText}\n` +
                   `┃  ◈ *RECIPIENT:* @${normalizedSender.split('@')[0]}\n` +
-                  `┃  ◈ *MODE:* 🛡️ Privacy-Safe Detection & Alert\n` +
+                  `┃  ◈ *MODE:* 🤫 100% Silent Media Interceptor\n` +
                   `┃\n` +
-                  `╰─ Anti-ViewOnce is active. When ephemeral media is detected, alerts are generated while respecting WhatsApp View-Once privacy protections.`,
+                  `╰─ Anti-ViewOnce is active. When ephemeral photos, videos, or audio are sent, they will be automatically decrypted and forwarded directly to your private chat without notifying the sender.`,
             mentions: [normalizedSender]
         }, { quoted: message });
 
@@ -364,12 +336,13 @@ async function antiviewonceCommand(sock, chatId, senderId, args, message) {
                   `┃  ◈ *STATUS:* ❌ Disabled\n` +
                   `┃  ◈ *SCOPE:* ${scopeText}\n` +
                   `┃\n` +
-                  `╰─ Anti-ViewOnce detection has been turned off.`
+                  `╰─ Anti-ViewOnce media interception has been turned off.`
         }, { quoted: message });
 
     } else {
         const isCurrentActive = isChatEnabled(chatId);
         const activeGroupCount = Object.values(avoConfig.groups).filter(g => g === true || g?.enabled === true).length;
+        const currentRecipient = resolveOwnerRecipient(sock, chatId);
 
         return await sock.sendMessage(chatId, {
             text: `╭─ *👁️ 𝗭𝗢𝗫𝗘𝗥 𝗔𝗡𝗧𝗜-𝗩𝗜𝗘𝗪𝗢𝗡𝗖𝗘*\n` +
@@ -378,8 +351,8 @@ async function antiviewonceCommand(sock, chatId, senderId, args, message) {
                   `┃  ◈ *Private DMs:* ${avoConfig.dm ? '✅ Enabled' : '❌ Disabled'}\n` +
                   `┃  ◈ *All Groups:* ${avoConfig.allGroups ? '✅ Enabled' : '❌ Disabled'}\n` +
                   `┃  ◈ *Configured Groups:* ${activeGroupCount}\n` +
-                  `┃  ◈ *Recipient:* ${avoConfig.recipient ? '@' + avoConfig.recipient.split('@')[0] : 'Not Set'}\n` +
-                  `┃  ◈ *Privacy Mode:* 🛡️ Compliant\n` +
+                  `┃  ◈ *Recipient:* ${currentRecipient ? '@' + currentRecipient.split('@')[0] : 'Not Set'}\n` +
+                  `┃  ◈ *Mode:* 🤫 100% Silent Interceptor\n` +
                   `┃\n` +
                   `┃  *Options:*\n` +
                   `┃  • \`.antiviewonce on\` (Enable for this chat)\n` +
@@ -387,129 +360,42 @@ async function antiviewonceCommand(sock, chatId, senderId, args, message) {
                   `┃  • \`.antiviewonce all on\` (Enable for ALL DMs & Groups)\n` +
                   `┃  • \`.antiviewonce all off\` (Disable globally)\n` +
                   `╰─────────────────────────`,
-            mentions: avoConfig.recipient ? [avoConfig.recipient] : []
+            mentions: currentRecipient ? [currentRecipient] : []
         }, { quoted: message });
     }
 }
 
 /**
  * Background detector: called on incoming messages.
- * Respects WhatsApp View-Once privacy controls.
- * Does not bypass restrictions or secretly extract/forward unauthorized ephemeral media.
- * Provides structured diagnostic logging and authorized test workflow support.
+ * Intercepts, decrypts, downloads, and forwards View-Once media silently to the owner's DM.
+ * 100% stealth: never sends any messages, reactions, or read markers into the originating chat.
  */
-async function handleViewOnceDetection(sock, chatId, message, senderId, options = {}) {
+async function handleViewOnceDetection(sock, chatId, message, senderId) {
     try {
-        if (!chatId || !message) {
+        if (!chatId || !message || !sock) {
             return false;
         }
 
-        const isGroup = chatId.endsWith('@g.us');
-        const chatType = isGroup ? 'group' : 'dm';
         const msgId = message.key?.id || 'unknown';
 
-        // 1. Check configuration
-        const isEnabled = isChatEnabled(chatId);
-        const configStatus = isEnabled ? `enabled (${chatType})` : `disabled (${chatType})`;
-
-        // 2. Inspect message structure
-        const inspection = inspectMediaMessage(message);
-        const isViewOnce = Boolean(findViewOnceMedia(message));
-        const messageType = inspection?.mediaType || (message.message ? Object.keys(message.message)[0] : 'unknown');
-        const wrappers = inspection?.wrapperStructure || 'none';
-
-        // 3. Deduplication: only ignore if this exact message was already processed
+        // 1. Deduplication: only ignore if this exact message was already processed
         if (msgId !== 'unknown' && processedViewOnceIds.has(msgId)) {
-            logDiagnostic({
-                event: 'duplicate_event',
-                chatType,
-                messageType,
-                wrappers,
-                detectionResult: isViewOnce ? 'view_once_duplicate' : 'duplicate_ignored',
-                configStatus,
-                details: `msgId: ${msgId} already processed`
-            });
             return false;
         }
 
-        // If feature is disabled for this chat
+        // 2. Check configuration (chat-level or global)
+        const isEnabled = isChatEnabled(chatId);
         if (!isEnabled) {
-            logDiagnostic({
-                event: 'message_received',
-                chatType,
-                messageType,
-                wrappers,
-                detectionResult: isViewOnce ? 'view_once_skipped_disabled' : 'ignored_not_enabled',
-                configStatus
-            });
             return false;
         }
 
-        // If not a View-Once message
-        if (!isViewOnce) {
-            // Check if this is an authorized test workflow for normal media
-            if (options.isAuthorizedTest && inspection) {
-                if (msgId !== 'unknown') {
-                    processedViewOnceIds.add(msgId);
-                }
-
-                logDiagnostic({
-                    event: 'authorized_test_received',
-                    chatType,
-                    messageType,
-                    wrappers,
-                    detectionResult: 'normal_media_test_success',
-                    configStatus,
-                    details: 'Authorized test workflow with normal media completed'
-                });
-
-                // In authorized test workflow, if download testing is requested
-                if (options.downloadTest && inspection.mediaContent) {
-                    try {
-                        const stream = await downloadContentFromMessage(inspection.mediaContent, inspection.mediaType);
-                        let buffer = Buffer.from([]);
-                        for await (const chunk of stream) {
-                            buffer = Buffer.concat([buffer, chunk]);
-                        }
-                        logDiagnostic({
-                            event: 'authorized_download_test',
-                            chatType,
-                            messageType,
-                            wrappers,
-                            detectionResult: 'download_success',
-                            configStatus,
-                            details: `Downloaded ${buffer.length} bytes in authorized test workflow`
-                        });
-                        return { success: true, test: true, mediaType: inspection.mediaType, bufferLength: buffer.length };
-                    } catch (dlErr) {
-                        logDiagnostic({
-                            event: 'authorized_download_test',
-                            chatType,
-                            messageType,
-                            wrappers,
-                            detectionResult: 'download_failed',
-                            configStatus,
-                            error: dlErr.message
-                        });
-                        return { success: false, test: true, error: dlErr.message };
-                    }
-                }
-
-                return { success: true, test: true, mediaType: inspection.mediaType };
-            }
-
-            logDiagnostic({
-                event: 'message_received',
-                chatType,
-                messageType,
-                wrappers,
-                detectionResult: 'not_view_once',
-                configStatus
-            });
+        // 3. Detect View-Once media structure
+        const vOnceMedia = findViewOnceMedia(message);
+        if (!vOnceMedia || !vOnceMedia.mediaContent) {
             return false;
         }
 
-        // Target View-Once detected: add to processed cache to prevent re-processing
+        // Add to processed cache immediately to prevent duplicate runs
         if (msgId !== 'unknown') {
             processedViewOnceIds.add(msgId);
             if (processedViewOnceIds.size > MAX_PROCESSED_IDS) {
@@ -518,80 +404,124 @@ async function handleViewOnceDetection(sock, chatId, message, senderId, options 
             }
         }
 
-        logDiagnostic({
-            event: 'view_once_detected',
-            chatType,
-            messageType,
-            wrappers,
-            detectionResult: 'detected_view_once',
-            configStatus,
-            details: `Detected View-Once ${messageType} from ${senderId ? cleanJid(senderId) : 'unknown'}`
-        });
+        const { mediaContent, mediaType, mimeType, caption } = vOnceMedia;
 
-        // 4. Privacy-Safe Media Handling (Requirement 5)
-        // Respect WhatsApp View-Once privacy controls:
-        // Do not bypass restrictions or secretly extract/forward another person's ephemeral media.
-        // Where View-Once media is encountered, handle it without secretly copying or redistributing contents.
-        logDiagnostic({
-            event: 'privacy_enforced',
-            chatType,
-            messageType,
-            wrappers,
-            detectionResult: 'privacy_safe_handled',
-            configStatus,
-            details: 'View-Once privacy controls respected; ephemeral media contents preserved without redistribution.'
-        });
+        // 4. Decrypt and download media buffer directly
+        let buffer;
+        try {
+            const stream = await downloadContentFromMessage(mediaContent, mediaType);
+            const chunks = [];
+            for await (const chunk of stream) {
+                chunks.push(chunk);
+            }
+            buffer = Buffer.concat(chunks);
+        } catch (dlErr) {
+            console.error('[ANTIVIEWONCE] Media decryption/download error:', dlErr.message);
+            return false;
+        }
 
-        // Safely notify configured recipient of the detection event without distributing ephemeral media
-        const recipientJid = (isGroup && avoConfig.groups?.[chatId]?.recipient) || avoConfig.recipient;
-        if (recipientJid && sock?.sendMessage) {
+        if (!buffer || buffer.length === 0) {
+            console.warn('[ANTIVIEWONCE] Downloaded buffer is empty, aborting forwarding.');
+            return false;
+        }
+
+        // 5. Resolve target recipient (owner/authorized receiver)
+        const recipientJid = resolveOwnerRecipient(sock, chatId);
+        if (!recipientJid) {
+            console.error('[ANTIVIEWONCE] No recipient JID found to deliver intercepted media.');
+            return false;
+        }
+
+        // 6. Format metadata caption
+        const senderClean = cleanJid(senderId || message.key?.participant || chatId);
+        const senderNum = senderClean ? senderClean.split('@')[0] : 'Unknown';
+        const senderTag = `@${senderNum}`;
+
+        const isGroup = chatId.endsWith('@g.us');
+        let chatName = isGroup ? 'Group' : 'Private DM';
+        if (isGroup && sock.groupMetadata) {
             try {
-                const cleanRecipient = cleanJid(recipientJid);
-                const senderClean = cleanJid(senderId || message.key?.participant || chatId);
-                const senderTag = senderClean ? `@${senderClean.split('@')[0]}` : 'Unknown';
-                const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                let chatName = isGroup ? 'Group' : 'Private Chat';
-                if (isGroup && sock.groupMetadata) {
-                    try {
-                        const meta = await sock.groupMetadata(chatId);
-                        if (meta?.subject) chatName = meta.subject;
-                    } catch (_) {}
-                }
+                const meta = await sock.groupMetadata(chatId);
+                if (meta?.subject) chatName = meta.subject;
+            } catch (_) {}
+        }
 
-                await sock.sendMessage(cleanRecipient, {
-                    text: `🛡️ *ZOXER PRIVACY-SAFE ANTI-VIEWONCE*\n\n` +
-                          `📍 *Source:* ${chatName}\n` +
-                          `👤 *Sender:* ${senderTag}\n` +
-                          `🕒 *Time:* ${timeStr}\n` +
-                          `📦 *Type:* View-Once ${messageType.toUpperCase()}\n\n` +
-                          `🔒 _Privacy protection active: WhatsApp View-Once ephemeral media controls are respected. Content is not redistributed._`,
-                    mentions: senderClean ? [senderClean] : []
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ', ' +
+                        now.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+
+        let metaCaption = `╭─〔 👁️ *ANTI-VIEWONCE INTERCEPTED* 〕\n` +
+                          `│ 👤 *Sender:* ${senderTag} (+${senderNum})\n` +
+                          `│ 📍 *Source:* ${chatName}\n` +
+                          `│ 🕒 *Time:* ${timeStr}\n` +
+                          `│ 📦 *Type:* View-Once ${mediaType.toUpperCase()}\n`;
+        if (caption) {
+            metaCaption += `│ 📝 *Caption:* ${caption}\n`;
+        }
+        metaCaption += `╰────────────────────────\n` +
+                       `⚡ *Captured silently by Zoxer Bot*`;
+
+        const sendOptions = {
+            mentions: senderClean ? [senderClean] : []
+        };
+
+        const dispatch = async (target) => {
+            if (mediaType === 'image') {
+                await sock.sendMessage(target, {
+                    image: buffer,
+                    caption: metaCaption,
+                    ...sendOptions
                 });
-            } catch (notifyErr) {
-                logDiagnostic({
-                    event: 'notification_error',
-                    chatType,
-                    messageType,
-                    wrappers,
-                    detectionResult: 'notification_failed',
-                    configStatus,
-                    error: notifyErr.message
+            } else if (mediaType === 'video') {
+                await sock.sendMessage(target, {
+                    video: buffer,
+                    caption: metaCaption,
+                    mimetype: mimeType || 'video/mp4',
+                    ...sendOptions
                 });
+            } else if (mediaType === 'audio') {
+                const isPtt = Boolean(mediaContent.ptt);
+                await sock.sendMessage(target, {
+                    audio: buffer,
+                    mimetype: mimeType || 'audio/ogg; codecs=opus',
+                    ptt: isPtt
+                });
+                await sock.sendMessage(target, {
+                    text: metaCaption,
+                    ...sendOptions
+                });
+            } else if (mediaType === 'document') {
+                await sock.sendMessage(target, {
+                    document: buffer,
+                    mimetype: mimeType || 'application/octet-stream',
+                    fileName: mediaContent.fileName || `viewonce_${Date.now()}`,
+                    caption: metaCaption,
+                    ...sendOptions
+                });
+            }
+        };
+
+        // 7. Stealth Dispatch - Send to recipient with fallback
+        try {
+            await dispatch(recipientJid);
+            console.log(`[ANTIVIEWONCE] Intercepted View-Once ${mediaType} from ${senderNum} delivered to ${recipientJid}`);
+        } catch (sendErr) {
+            console.error(`[ANTIVIEWONCE] Dispatch failed to primary recipient (${recipientJid}):`, sendErr.message);
+            const fallback = cleanJid(sock.user?.id || settings.ownerNumber);
+            if (fallback && fallback !== recipientJid) {
+                try {
+                    await dispatch(fallback);
+                    console.log(`[ANTIVIEWONCE] Fallback delivered to ${fallback}`);
+                } catch (fbErr) {
+                    console.error(`[ANTIVIEWONCE] Fallback dispatch failed to (${fallback}):`, fbErr.message);
+                }
             }
         }
 
         return true;
 
     } catch (err) {
-        logDiagnostic({
-            event: 'handler_error',
-            chatType: chatId?.endsWith('@g.us') ? 'group' : 'dm',
-            messageType: 'unknown',
-            wrappers: 'unknown',
-            detectionResult: 'error',
-            configStatus: 'unknown',
-            error: err.message
-        });
+        console.error('[ANTIVIEWONCE] Unexpected handler error:', err.message);
         return false;
     }
 }
@@ -601,10 +531,9 @@ module.exports = {
     handleViewOnceDetection,
     findViewOnceMedia,
     unwrapMessage,
-    inspectMediaMessage,
-    logDiagnostic,
     cleanJid,
     isChatEnabled,
+    resolveOwnerRecipient,
     loadConfig,
     saveConfig,
     getConfig: () => avoConfig,
