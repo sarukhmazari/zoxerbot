@@ -1778,12 +1778,13 @@ async function handleMessages(sock, messageUpdate, printLog) {
             case userMessage === '.tostatus':
                 await tostatusCommand(sock, chatId, senderId, message);
                 break;
-            case userMessage.startsWith('.gcsstatus') || userMessage.startsWith('.gpstatus') || userMessage.startsWith('.gstatus') || userMessage.startsWith('.gcstatus') || userMessage.startsWith('.groupstatus') || userMessage.startsWith('.gorupstatus'):
+            case userMessage.startsWith('.gcsstatus') || userMessage.startsWith('.gpstatus') || userMessage.startsWith('.gstatus') || userMessage.startsWith('.gcstatus') || userMessage.startsWith('.gc status') || userMessage.startsWith('.groupstatus') || userMessage.startsWith('.gorupstatus'):
                 {
-                    const argsText = rawText.replace(/^\.(gcsstatus|gpstatus|gstatus|gcstatus|groupstatus|gorupstatus)\s*/i, '').trim();
+                    const argsText = rawText.replace(/^\.(gcsstatus|gpstatus|gstatus|gcstatus|gc\s+status|groupstatus|gorupstatus)\s*/i, '').trim();
                     gcsstatusCommand(sock, chatId, senderId, message, argsText).catch(err => {
                         console.error('[GCS-STATUS] Background execution error:', err.message);
                     });
+                    commandExecuted = true;
                 }
                 break;
             case userMessage === '.crop':

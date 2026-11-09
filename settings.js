@@ -17,12 +17,17 @@ const settings = {
   version: "1.0.0",
   logicUrl: process.env.LOGIC_URL || "", // Add your remote bin direct download link here
   updateZipUrl: "",
-  channelLink: "https://whatsapp.com/channel/0029VbBRITODzgTGQhZSFT3P",
-  newsletterJid: "120363404139113188@newsletter",
+  channelLink: process.env.CHANNEL_LINK || "https://whatsapp.com/channel/0029VbBRITODzgTGQhZSFT3P",
+  channelLinks: (process.env.CHANNEL_LINKS ? process.env.CHANNEL_LINKS.split(',') : [
+    "https://whatsapp.com/channel/0029VbBRITODzgTGQhZSFT3P",
+    "https://whatsapp.com/channel/0029VbDTUkl60eBjLWgKRa43"
+  ]),
+  newsletterJid: process.env.NEWSLETTER_JID || "120363404139113188@newsletter",
   connectionImagePath: process.env.CONNECTION_IMAGE_PATH || "./zoxer.jpg",
-  newsletters: [
-    '120363404139113188@newsletter'
-  ],
+  newsletters: (process.env.NEWSLETTERS ? process.env.NEWSLETTERS.split(',') : [
+    '120363404139113188@newsletter',
+    'https://whatsapp.com/channel/0029VbDTUkl60eBjLWgKRa43'
+  ]),
   knightBotApiKey: process.env.KNIGHTBOT_API_KEY || 'knight',
   mediaEngineApiUrl: process.env.MEDIA_ENGINE_API_URL || 'http://3.106.186.133:5050',
   zoxerMediaApiUrl: process.env.ZOXER_MEDIA_API_URL || 'http://3.106.186.133:5050',

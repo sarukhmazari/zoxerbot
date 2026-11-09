@@ -5,6 +5,8 @@ const settings = require('../settings');
 
 // Lock to prevent multiple concurrent broadcasts on the same bot session
 const activeBroadcasts = new Set();
+// Track processed command message IDs to prevent duplicate triggers from Baileys notify+append
+const processedCommandIds = new Set();
 
 /**
  * Non-blocking sleep helper
@@ -29,6 +31,17 @@ function withTimeout(promise, ms, errorMsg = 'Operation timed out') {
  * Optimized with 30-group batching, inter-batch cooldown, and retry recovery to eliminate bot lag.
  */
 async function gcsstatusCommand(sock, chatId, senderId, message, argsText = '') {
+    const cmdMsgId = message?.key?.id;
+    if (cmdMsgId) {
+        if (processedCommandIds.has(cmdMsgId)) {
+            console.warn(`[GCS-STATUS] Ignored duplicate trigger for message ${cmdMsgId}`);
+            return;
+        }
+        processedCommandIds.add(cmdMsgId);
+        // Automatically cleanup after 5 minutes
+        setTimeout(() => processedCommandIds.delete(cmdMsgId), 5 * 60 * 1000);
+    }
+
     const sessionKey = sock.user?.id ? sock.user.id.split(':')[0] : 'default';
 
     // Prevent concurrent broadcasts on the same session to avoid CPU and socket exhaustion
@@ -78,10 +91,10 @@ async function gcsstatusCommand(sock, chatId, senderId, message, argsText = '') 
             }, { quoted: message });
         }
 
-        // Channel link configuration for Promo Slide
-        const channelLink = process.env.CHANNEL_LINK || (settings && settings.channelLink) || global.channelLink || 'https://whatsapp.com/channel/0029VbBRITODzgTGQhZSFT3P';
+        // 3. User's Status Content: Strictly their original text with native channel attribution (Single slide, no duplicate promo slide)
+        const newsletterJid = (settings && settings.newsletterJid) || '120363404139113188@newsletter';
+        const newsletterName = (settings && (settings.botName || settings.packname)) || 'ZOXER BOT';
 
-        // 3. User's Status Content: Strictly their original text with NO channel link attached
         const messageContent = {
             extendedTextMessage: {
                 text: statusText,
@@ -92,23 +105,14 @@ async function gcsstatusCommand(sock, chatId, senderId, message, argsText = '') 
                         groupStatus: {
                             authorJid: senderId
                         }
-                    }]
-                }
-            }
-        };
-
-        // 4. Promo Status Content: Official channel link on the NEXT slide/page
-        const promoStatusContent = {
-            extendedTextMessage: {
-                text: `📢 *Official Channel:*\n${channelLink}`,
-                contextInfo: {
-                    isGroupStatus: true,
-                    statusSourceType: 4, // Text status
-                    statusAttributions: [{
-                        groupStatus: {
-                            authorJid: senderId
-                        }
-                    }]
+                    }],
+                    isForwarded: true,
+                    forwardingScore: 999,
+                    forwardedNewsletterMessageInfo: {
+                        newsletterJid: newsletterJid,
+                        newsletterName: newsletterName,
+                        serverMessageId: 1
+                    }
                 }
             }
         };
@@ -183,38 +187,27 @@ async function gcsstatusCommand(sock, chatId, senderId, message, argsText = '') 
 
                 let posted = false;
 
+                // Generate WAMessage ONCE for this target group so messageId remains stable across retries
+                const waMsg = generateWAMessageFromContent(targetJid, messageContent, {
+                    userJid: userBotJid
+                });
+                const msgId = waMsg.key.id;
+
                 // Attempt sending with 1 retry on momentary network glitch
                 for (let attempt = 1; attempt <= 2 && !posted; attempt++) {
                     try {
-                        // 1. Post User's status (Clean user text only, NO channel link on this slide)
-                        const waMsg = generateWAMessageFromContent(targetJid, messageContent, {
-                            userJid: userBotJid
-                        });
                         await withTimeout(
-                            sock.relayMessage(targetJid, waMsg.message, { messageId: waMsg.key.id }),
-                            10000,
+                            sock.relayMessage(targetJid, waMsg.message, { messageId: msgId }),
+                            15000,
                             `Relay message timeout for ${targetJid}`
-                        );
-
-                        // Small delay to ensure sequence
-                        await sleep(400);
-
-                        // 2. Post next status slide with the channel link
-                        const promoMsg = generateWAMessageFromContent(targetJid, promoStatusContent, {
-                            userJid: userBotJid
-                        });
-                        await withTimeout(
-                            sock.relayMessage(targetJid, promoMsg.message, { messageId: promoMsg.key.id }),
-                            10000,
-                            `Relay promo message timeout for ${targetJid}`
                         );
 
                         posted = true;
                         successCount++;
                     } catch (err) {
                         if (attempt === 1) {
-                            console.warn(`[GCS-STATUS] Attempt 1 failed for ${targetJid} (${err.message}). Retrying in 1s...`);
-                            await sleep(1000);
+                            console.warn(`[GCS-STATUS] Attempt 1 failed for ${targetJid} (${err.message}). Retrying in 1.5s...`);
+                            await sleep(1500);
                         } else {
                             console.error(`[GCS-STATUS] Failed to send to ${targetJid} after retry:`, err.message);
                             failCount++;

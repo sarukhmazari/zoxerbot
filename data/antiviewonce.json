@@ -1,5 +1,6 @@
 {
   "dm": false,
+  "allGroups": false,
   "recipient": null,
   "groups": {}
 }
