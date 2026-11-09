@@ -111,6 +111,8 @@ const commandCatalog = {
     'warnings': { category: 'Group Management', desc: 'Check active warning count for user.', usage: '.warnings @user' },
     'resetwarn': { category: 'Group Management', desc: 'Clear warning strikes for user back to 0/3.', usage: '.resetwarn @user' },
     'leave': { category: 'Group Management', desc: 'Instruct the bot to gracefully exit group.', usage: '.leave' },
+    'leaveclosed': { category: 'Group Management', desc: 'Auto-exit closed groups where bot is not admin.', usage: '.leaveclosed [on/off/run/status]' },
+    'autoleaveclosed': { category: 'Group Management', desc: 'Auto-exit closed groups where bot is not admin.', usage: '.autoleaveclosed [on/off/run/status]' },
     'groupinfo': { category: 'Group Management', desc: 'Show group metadata, creation date, and member count.', usage: '.groupinfo' },
     'staff': { category: 'Group Management', desc: 'List all group administrators.', usage: '.staff' },
     'adminlock': { category: 'Group Management', desc: 'Auto demote unauthorized admin promotions.', usage: '.adminlock' },

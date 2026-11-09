@@ -327,6 +327,7 @@ const dictionaryCommand = require('./commands/dictionary');
 const timezoneCommand = require('./commands/timezone');
 const calcCommand = require('./commands/calc');
 const { linkCommand, leaveCommand, tagGhostCommand } = require('./commands/groupextras');
+const { autoleaveclosedCommand, handleGroupParticipantUpdateForAutoLeave } = require('./commands/autoleaveclosed');
 const { getBioCommand, blockCommand, unblockCommand, setNameCommand, setBioCommand } = require('./commands/profileutils');
 const { rollCommand, flipCoinCommand, slotsCommand, riddleCommand, pickCommand } = require('./commands/games');
 const { base64Command, binaryCommand, hashCommand } = require('./commands/devutils');
@@ -802,7 +803,7 @@ async function handleMessages(sock, messageUpdate, printLog) {
         const isAdminCommand = adminCommands.some(cmd => userMessage.startsWith(cmd)) && !isAddLink;
 
         // List of owner commands
-        const ownerCommands = ['.mode', '.stealth', '.smartreply', '.autoreply', '.autostatus', '.antidelete', '.cleartmp', '.setpp', '.clearsession', '.areact', '.autoreact', '.autotyping', '.autoread', '.autojoinlinks', '.pmblocker', '.setmenudp', '.setdp', '.setmenumusic', '.setmusic', '.setdpd', '.setdpdefault', '.restart', '.reboot', '.broadcast', '.bc', '.block', '.unblock', '.setname', '.setbio', '.setabout'];
+        const ownerCommands = ['.mode', '.stealth', '.smartreply', '.autoreply', '.autostatus', '.antidelete', '.cleartmp', '.setpp', '.clearsession', '.areact', '.autoreact', '.autotyping', '.autoread', '.autojoinlinks', '.autoleaveclosed', '.leaveclosed', '.leaveclose', '.pmblocker', '.setmenudp', '.setdp', '.setmenumusic', '.setmusic', '.setdpd', '.setdpdefault', '.restart', '.reboot', '.broadcast', '.bc', '.block', '.unblock', '.setname', '.setbio', '.setabout'];
         const isOwnerCommand = ownerCommands.some(cmd => userMessage.startsWith(cmd));
 
         let isSenderAdmin = false;
@@ -1938,6 +1939,13 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 await leaveCommand(sock, chatId, message, senderId);
                 commandExecuted = true;
                 break;
+            case userMessage.startsWith('.autoleaveclosed') || userMessage.startsWith('.leaveclosed') || userMessage.startsWith('.leaveclose'):
+                {
+                    const args = userMessage.split(/\s+/).slice(1);
+                    await autoleaveclosedCommand(sock, chatId, senderId, message, args);
+                    commandExecuted = true;
+                }
+                break;
             case userMessage === '.tagghost' || userMessage === '.ghosts':
                 await tagGhostCommand(sock, chatId, message, senderId);
                 commandExecuted = true;
@@ -2152,6 +2160,7 @@ async function handleGroupParticipantUpdate(sock, update) {
 
             if (!isPublic) return;
             await handleDemotionEvent(sock, id, participants, author);
+            await handleGroupParticipantUpdateForAutoLeave(sock, id, action, participants);
             return;
         }
 
@@ -2159,6 +2168,7 @@ async function handleGroupParticipantUpdate(sock, update) {
         if (action === 'add') {
             await handleAntiforeignJoin(sock, id, participants);
             await handleJoinEvent(sock, id, participants);
+            await handleGroupParticipantUpdateForAutoLeave(sock, id, action, participants);
         }
 
         // Handle leave events
