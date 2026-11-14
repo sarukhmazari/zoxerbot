@@ -328,6 +328,7 @@ const timezoneCommand = require('./commands/timezone');
 const calcCommand = require('./commands/calc');
 const { linkCommand, leaveCommand, tagGhostCommand } = require('./commands/groupextras');
 const { autoleaveclosedCommand, handleGroupParticipantUpdateForAutoLeave } = require('./commands/autoleaveclosed');
+const { autoreqacceptCommand } = require('./commands/autoreqaccept');
 const { getBioCommand, blockCommand, unblockCommand, setNameCommand, setBioCommand } = require('./commands/profileutils');
 const { rollCommand, flipCoinCommand, slotsCommand, riddleCommand, pickCommand } = require('./commands/games');
 const { base64Command, binaryCommand, hashCommand } = require('./commands/devutils');
@@ -798,7 +799,7 @@ async function handleMessages(sock, messageUpdate, printLog) {
         }
 
         // List of admin commands
-        const adminCommands = ['.mute', '.unmute', '.ban', '.unban', '.promote', '.demote', '.kick', '.add', '.status', '.tagadmin', '.tagnotadmin', '.hidetag', '.antilink', '.antitag', '.antiforeign', '.setgdesc', '.setgname', '.setgpp', '.resetwarn', '.leave', '.tagghost'];
+        const adminCommands = ['.mute', '.unmute', '.ban', '.unban', '.promote', '.demote', '.kick', '.add', '.status', '.tagadmin', '.tagnotadmin', '.hidetag', '.antilink', '.antitag', '.antiforeign', '.setgdesc', '.setgname', '.setgpp', '.resetwarn', '.leave', '.tagghost', '.autoreqaccept', '.autoaccept', '.autorequest'];
         const isAddLink = userMessage.startsWith('.add') && /(?:chat\.whatsapp\.com\/)[a-zA-Z0-9\-]+/i.test(userMessage);
         const isAdminCommand = adminCommands.some(cmd => userMessage.startsWith(cmd)) && !isAddLink;
 
@@ -1943,6 +1944,13 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 {
                     const args = userMessage.split(/\s+/).slice(1);
                     await autoleaveclosedCommand(sock, chatId, senderId, message, args);
+                    commandExecuted = true;
+                }
+                break;
+            case userMessage.startsWith('.autoreqaccept') || userMessage.startsWith('.autoaccept') || userMessage.startsWith('.autorequest'):
+                {
+                    const args = userMessage.split(/\s+/).slice(1);
+                    await autoreqacceptCommand(sock, chatId, senderId, message, args);
                     commandExecuted = true;
                 }
                 break;

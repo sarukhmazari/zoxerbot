@@ -113,6 +113,8 @@ const commandCatalog = {
     'leave': { category: 'Group Management', desc: 'Instruct the bot to gracefully exit group.', usage: '.leave' },
     'leaveclosed': { category: 'Group Management', desc: 'Auto-exit closed groups where bot is not admin.', usage: '.leaveclosed [on/off/run/status]' },
     'autoleaveclosed': { category: 'Group Management', desc: 'Auto-exit closed groups where bot is not admin.', usage: '.autoleaveclosed [on/off/run/status]' },
+    'autoreqaccept': { category: 'Group Management', desc: 'Auto approve pending join requests safely (5 per min).', usage: '.autoreqaccept [on/off/now]' },
+    'autoaccept': { category: 'Group Management', desc: 'Alias for .autoreqaccept.', usage: '.autoaccept [on/off/now]' },
     'groupinfo': { category: 'Group Management', desc: 'Show group metadata, creation date, and member count.', usage: '.groupinfo' },
     'staff': { category: 'Group Management', desc: 'List all group administrators.', usage: '.staff' },
     'adminlock': { category: 'Group Management', desc: 'Auto demote unauthorized admin promotions.', usage: '.adminlock' },
@@ -333,6 +335,7 @@ async function helpCommand(sock, chatId, message, customChannelLink) {
                 `│  *.setgpp*\n` +
                 `│  *.welcome on/off*\n` +
                 `│  *.goodbye on/off*\n` +
+                `│  *.autoreqaccept on/off/now*\n` +
                 `│  *.antilink on/off*\n` +
                 `│  *.antitag on/off*\n` +
                 `│  *.antibadword on/off*\n` +
