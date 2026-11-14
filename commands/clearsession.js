@@ -1,6 +1,5 @@
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const isOwnerOrSudo = require('../lib/isOwner');
 
 const channelInfo = {};
@@ -35,43 +34,48 @@ async function clearSessionCommand(sock, chatId, msg) {
 
         // Send initial status
         await sock.sendMessage(chatId, { 
-            text: `🔍 Optimizing session files for better performance...`,
+            text: `🔍 Optimizing session files across all bot sessions...`,
             ...channelInfo
         });
 
-        const files = fs.readdirSync(sessionDir);
-        
-        // Count files by type for optimization
-        let appStateSyncCount = 0;
-        let preKeyCount = 0;
-
-        for (const file of files) {
-            if (file.startsWith('app-state-sync-')) appStateSyncCount++;
-            if (file.startsWith('pre-key-')) preKeyCount++;
+        // Scan root and any session subdirectories
+        const directoriesToClean = [sessionDir];
+        const entries = fs.readdirSync(sessionDir);
+        for (const entry of entries) {
+            const fullPath = path.join(sessionDir, entry);
+            if (fs.lstatSync(fullPath).isDirectory()) {
+                directoriesToClean.push(fullPath);
+            }
         }
 
-        // Delete files
-        for (const file of files) {
-            if (file === 'creds.json') {
-                // Skip creds.json file
-                continue;
-            }
+        let preKeyCount = 0;
+
+        for (const dir of directoriesToClean) {
             try {
-                const filePath = path.join(sessionDir, file);
-                fs.unlinkSync(filePath);
-                filesCleared++;
-            } catch (error) {
-                errors++;
-                errorDetails.push(`Failed to delete ${file}: ${error.message}`);
-            }
+                const files = fs.readdirSync(dir);
+                for (const file of files) {
+                    // Only safely clear stale pre-keys (never creds.json or app-state)
+                    if (file.startsWith('pre-key-') && file.endsWith('.json')) {
+                        preKeyCount++;
+                        try {
+                            fs.unlinkSync(path.join(dir, file));
+                            filesCleared++;
+                        } catch (err) {
+                            errors++;
+                            if (errorDetails.length < 5) {
+                                errorDetails.push(`${file}: ${err.message}`);
+                            }
+                        }
+                    }
+                }
+            } catch (_) {}
         }
 
         // Send completion message
-        const message = `✅ Session files cleared successfully!\n\n` +
+        const message = `✅ Session files optimized successfully!\n\n` +
                        `📊 Statistics:\n` +
-                       `• Total files cleared: ${filesCleared}\n` +
-                       `• App state sync files: ${appStateSyncCount}\n` +
-                       `• Pre-key files: ${preKeyCount}\n` +
+                       `• Total obsolete pre-keys cleared: ${filesCleared}\n` +
+                       `• Active credentials & app states: Preserved 🛡️\n` +
                        (errors > 0 ? `\n⚠️ Errors encountered: ${errors}\n${errorDetails.join('\n')}` : '');
 
         await sock.sendMessage(chatId, { 
@@ -88,4 +92,4 @@ async function clearSessionCommand(sock, chatId, msg) {
     }
 }
 
-module.exports = clearSessionCommand; 
+module.exports = clearSessionCommand;

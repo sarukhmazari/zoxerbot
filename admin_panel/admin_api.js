@@ -259,6 +259,19 @@ function startAdminApi() {
     });
   });
 
+  // GET /api/sessions - List all registered and active WhatsApp sessions
+  app.get('/api/sessions', (req, res) => {
+    const all = [];
+    for (const [phone, state] of sessionStates.entries()) {
+      all.push({
+        phone,
+        status: state,
+        hasSocket: sessions.has(phone)
+      });
+    }
+    res.json({ success: true, count: all.length, sessions: all });
+  });
+
   // GET /api/sessions/:sessionId/status - Verify specific authenticated session
   app.get('/api/sessions/:sessionId/status', async (req, res) => {
     const { sessionId } = req.params;
@@ -266,11 +279,16 @@ function startAdminApi() {
 
     const isConnected = sessionStates.get(cleanPhone) === 'CONNECTED';
     
-    // Check Supabase persistence record
+    // Check Supabase persistence record (with 2s timeout)
     let isPersisted = false;
     try {
-      const { data } = await supabase.from('bot_sessions').select('is_paired').eq('phone_number', cleanPhone).maybeSingle();
-      if (data && data.is_paired) isPersisted = true;
+      if (supabase && !supabase.isMock) {
+        const { data } = await Promise.race([
+          supabase.from('bot_sessions').select('is_paired').eq('phone_number', cleanPhone).maybeSingle(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000))
+        ]);
+        if (data && data.is_paired) isPersisted = true;
+      }
     } catch (_) {}
 
     res.json({

@@ -2228,7 +2228,10 @@ async function launch() {
 
     if (!supabase.isMock) {
         try {
-            const { data, error: healthError } = await supabase.from('bot_sessions').select('phone_number').eq('is_paired', true);
+            const { data, error: healthError } = await Promise.race([
+                supabase.from('bot_sessions').select('phone_number').eq('is_paired', true),
+                new Promise((_, reject) => setTimeout(() => reject(new Error('DB check timeout')), 2500))
+            ]);
             if (!healthError && data) {
                 dbConnected = true;
                 dbSessions = data || [];
@@ -2255,7 +2258,12 @@ async function launch() {
         });
         if (folders.length > 0) {
             hasExistingSession = true;
-            primaryPhone = folders[0];
+            const ownerClean = (settings.ownerNumber || '').replace(/[^0-9]/g, '');
+            if (ownerClean && folders.includes(ownerClean)) {
+                primaryPhone = ownerClean;
+            } else {
+                primaryPhone = folders[0];
+            }
         }
     }
 
@@ -2299,30 +2307,28 @@ async function launch() {
         }
     }
 
-    // Initialize/Resume other existing sessions
-    if (dbConnected) {
-        const pairedSessions = dbSessions || [];
-        const otherSessions = pairedSessions.filter(s => s.phone_number.replace(/[^0-9]/g, '') !== primaryPhone);
-        if (otherSessions.length > 0) {
-            console.log(chalk.blue(`📡 Resuming ${otherSessions.length} active sessions from database...`));
-            for (const session of otherSessions) {
-                const dbPhone = session.phone_number.replace(/[^0-9]/g, '');
-                initSession(dbPhone).catch(err => console.error(`Failed to init session ${dbPhone}:`, err));
-                await new Promise(resolve => setTimeout(resolve, 2000)); // 2s stagger
-            }
-        }
-    } else if (fs.existsSync(sessionDir)) {
+    // Initialize/Resume other existing sessions from both DB and local storage
+    const allKnownPhones = new Set();
+    if (dbConnected && dbSessions && dbSessions.length > 0) {
+        dbSessions.forEach(s => {
+            const num = (s.phone_number || '').replace(/[^0-9]/g, '');
+            if (num) allKnownPhones.add(num);
+        });
+    }
+    if (fs.existsSync(sessionDir)) {
         const localSessions = fs.readdirSync(sessionDir).filter(name => {
             const folderPath = path.join(sessionDir, name);
             return fs.lstatSync(folderPath).isDirectory() && fs.existsSync(path.join(folderPath, 'creds.json'));
         });
-        const sessionsToLoad = localSessions.filter(phone => phone !== primaryPhone);
-        if (sessionsToLoad.length > 0) {
-            console.log(chalk.blue(`📁 Loading ${sessionsToLoad.length} sessions from local storage...`));
-            for (const phone of sessionsToLoad) {
-                initSession(phone).catch(err => console.error(`Failed to init local session ${phone}:`, err));
-                await new Promise(resolve => setTimeout(resolve, 2000)); // 2s stagger
-            }
+        localSessions.forEach(num => allKnownPhones.add(num));
+    }
+
+    const sessionsToLoad = Array.from(allKnownPhones).filter(phone => phone !== primaryPhone);
+    if (sessionsToLoad.length > 0) {
+        console.log(chalk.blue(`📁 Loading ${sessionsToLoad.length} additional sessions...`));
+        for (const phone of sessionsToLoad) {
+            initSession(phone).catch(err => console.error(`Failed to init session ${phone}:`, err));
+            await new Promise(resolve => setTimeout(resolve, 2000)); // 2s stagger
         }
     }
 
