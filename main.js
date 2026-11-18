@@ -250,6 +250,7 @@ const { handlePromotionEvent } = require('./commands/promote');
 const { handleDemotionEvent } = require('./commands/demote');
 const viewOnceCommand = require('./commands/viewonce');
 const { extractViewOnceMedia, cacheViewOnceMessage, viewOnceCache, isHeartCommand, cleanJid } = require('./commands/viewonce');
+const imgeventCommand = require('./commands/imgevent');
 const clearSessionCommand = require('./commands/clearsession');
 const { autoStatusCommand, handleStatusUpdate } = require('./commands/autostatus');
 const { simpCommand } = require('./commands/simp');
@@ -1515,6 +1516,10 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 break;
             case userMessage.startsWith('.tourl') || userMessage.startsWith('.url'):
                 await urlCommand(sock, chatId, message);
+                break;
+
+            case userMessage.startsWith('.imgevent') || userMessage.startsWith('.promoevent'):
+                await imgeventCommand(sock, chatId, message, rawText);
                 break;
 
             case userMessage.startsWith('.vv'):

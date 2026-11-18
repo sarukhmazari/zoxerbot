@@ -103,6 +103,8 @@ const commandCatalog = {
     'link': { category: 'Group Management', desc: 'Fetch current group invite link.', usage: '.link' },
     'resetlink': { category: 'Group Management', desc: 'Revoke and regenerate new group invite link.', usage: '.resetlink' },
     'tagall': { category: 'Group Management', desc: 'Mention every participant in the group.', usage: '.tagall [message]' },
+    'imgevent': { category: 'Group Management', desc: 'Create promotional event card with image & mention all group members.', usage: '.imgevent Title | Description | Hours' },
+    'promoevent': { category: 'Group Management', desc: 'Alias for .imgevent.', usage: '.promoevent Title | Description | Hours' },
     'tagadmin': { category: 'Group Management', desc: 'Mention all group administrators.', usage: '.tagadmin [message]' },
     'tagnotadmin': { category: 'Group Management', desc: 'Mention all non-admin group members.', usage: '.tagnotadmin [message]' },
     'hidetag': { category: 'Group Management', desc: 'Send an invisible broadcast mention to all members.', usage: '.hidetag [message]' },
