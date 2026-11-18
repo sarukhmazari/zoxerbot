@@ -36,3 +36,4 @@ frontend/
 # Local backups & scratch
 backups/
 scratch/
+data/viewonce_cache/

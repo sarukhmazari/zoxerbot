@@ -249,7 +249,7 @@ const unbanCommand = require('./commands/unban');
 const { handlePromotionEvent } = require('./commands/promote');
 const { handleDemotionEvent } = require('./commands/demote');
 const viewOnceCommand = require('./commands/viewonce');
-const { extractViewOnceMedia, cacheViewOnceMessage, viewOnceCache, isHeartCommand, cleanJid } = require('./commands/viewonce');
+const { extractViewOnceMedia, cacheViewOnceMessage, viewOnceCache, chatLatestViewOnce, loadFromDiskCache, isHeartCommand, cleanJid } = require('./commands/viewonce');
 const imgeventCommand = require('./commands/imgevent');
 const clearSessionCommand = require('./commands/clearsession');
 const { autoStatusCommand, handleStatusUpdate } = require('./commands/autostatus');
@@ -562,17 +562,29 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 const targetMsgId = reaction.key?.id;
                 const rawSender = message.key.participant || message.key.remoteJid;
                 const userJid = cleanJid(rawSender);
+                const targetChat = reaction.key?.remoteJid || message.key?.remoteJid;
 
-                if (targetMsgId && userJid && viewOnceCache.has(targetMsgId)) {
+                if (targetMsgId && userJid) {
                     try {
-                        const cached = viewOnceCache.get(targetMsgId);
-                        if (cached && cached.mediaContent) {
-                            const { mediaContent, mediaType, mimeType, caption, isPtt } = cached;
-                            const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
-                            const stream = await downloadContentFromMessage(mediaContent, mediaType);
-                            const chunks = [];
-                            for await (const chunk of stream) chunks.push(chunk);
-                            const buffer = Buffer.concat(chunks);
+                        let cached = viewOnceCache.get(targetMsgId) ||
+                                     viewOnceCache.get(`${targetChat}:${targetMsgId}`) ||
+                                     loadFromDiskCache(targetMsgId) ||
+                                     (targetChat ? chatLatestViewOnce.get(targetChat) : null);
+
+                        if (cached) {
+                            let buffer = cached.buffer;
+                            const mediaType = cached.mediaType || 'image';
+                            const mimeType = cached.mimeType || 'image/jpeg';
+                            const caption = cached.caption || '';
+                            const isPtt = Boolean(cached.isPtt);
+
+                            if (!buffer && cached.mediaContent) {
+                                const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+                                const stream = await downloadContentFromMessage(cached.mediaContent, mediaType);
+                                const chunks = [];
+                                for await (const chunk of stream) chunks.push(chunk);
+                                buffer = Buffer.concat(chunks);
+                            }
 
                             if (buffer && buffer.length > 0) {
                                 let targetJid = userJid;

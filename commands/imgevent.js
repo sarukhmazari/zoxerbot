@@ -2,9 +2,6 @@ const crypto = require('crypto');
 const {
     downloadMediaMessage,
     downloadContentFromMessage,
-    generateWAMessage,
-    generateWAMessageFromContent,
-    proto,
     jidNormalizedUser
 } = require('@whiskeysockets/baileys');
 const settings = require('../settings');
@@ -39,7 +36,8 @@ function unwrapMessage(msg) {
             !current.imageMessage &&
             !current.videoMessage &&
             !current.audioMessage &&
-            !current.documentMessage
+            !current.documentMessage &&
+            !current.ptvMessage
         ) {
             current = current.message;
         } else {
@@ -63,6 +61,8 @@ function getContextInfo(message) {
         if (current.extendedTextMessage?.contextInfo) return current.extendedTextMessage.contextInfo;
         if (current.imageMessage?.contextInfo) return current.imageMessage.contextInfo;
         if (current.videoMessage?.contextInfo) return current.videoMessage.contextInfo;
+        if (current.audioMessage?.contextInfo) return current.audioMessage.contextInfo;
+        if (current.documentMessage?.contextInfo) return current.documentMessage.contextInfo;
         if (current.contextInfo) return current.contextInfo;
 
         if (current.ephemeralMessage?.message) {
@@ -86,18 +86,7 @@ function getContextInfo(message) {
  * Downloads image buffer from message using multiple fallback strategies
  */
 async function downloadImageBuffer(sock, targetMessage, imageMessage) {
-    // Strategy 1: downloadMediaMessage with sock reupload handler
-    try {
-        if (targetMessage) {
-            const buffer = await downloadMediaMessage(targetMessage, 'buffer', {}, {
-                logger: undefined,
-                reuploadRequest: sock?.updateMediaMessage
-            });
-            if (buffer && buffer.length > 0) return buffer;
-        }
-    } catch (_) {}
-
-    // Strategy 2: downloadContentFromMessage stream directly from imageMessage
+    // Strategy 1: downloadContentFromMessage stream directly from imageMessage
     try {
         if (imageMessage) {
             const stream = await downloadContentFromMessage(imageMessage, 'image');
@@ -108,13 +97,25 @@ async function downloadImageBuffer(sock, targetMessage, imageMessage) {
         }
     } catch (_) {}
 
+    // Strategy 2: downloadMediaMessage with sock reupload handler
+    try {
+        if (targetMessage) {
+            const buffer = await downloadMediaMessage(targetMessage, 'buffer', {}, {
+                logger: undefined,
+                reuploadRequest: sock?.updateMediaMessage
+            });
+            if (buffer && buffer.length > 0) return buffer;
+        }
+    } catch (_) {}
+
     return null;
 }
 
 /**
  * Command: .imgevent / .promoevent
- * Creates a native WhatsApp Event Card in group chats with Going / Can't Go buttons,
- * participant mentions, start/end timestamps, location, and optional promo image.
+ * Creates a native WhatsApp Event Card in group chats on WhatsApp Mobile with
+ * interactive Going / Can't Go RSVP buttons, start/end timestamps, location,
+ * member mentions, and promotional image banner.
  *
  * Usage:
  *   Reply to an image with: .imgevent Title | Description | HoursFromNow
@@ -176,7 +177,7 @@ async function imgeventCommand(sock, chatId, message, rawText) {
             return await sock.sendMessage(chatId, {
                 text: `╭─〔 📅 *ZOXER PROMOTIONAL EVENT* 〕\n` +
                       `│\n` +
-                      `│ ❌ *No image or event details provided!*\n` +
+                      `│ ❌ *No event details provided!*\n` +
                       `│\n` +
                       `│ 📌 *How to use:*\n` +
                       `│ • *With image banner:*\n` +
@@ -185,7 +186,7 @@ async function imgeventCommand(sock, chatId, message, rawText) {
                       `│   *Or* send an image with caption:\n` +
                       `│   \`.imgevent Title | Description | HoursFromNow\`\n` +
                       `│\n` +
-                      `│ • *Simple / Quick format:*\n` +
+                      `│ • *Quick / Simple format:*\n` +
                       `│   \`.imgevent Title\`\n` +
                       `│\n` +
                       `│ 💡 *Example:*\n` +
@@ -218,7 +219,7 @@ async function imgeventCommand(sock, chatId, message, rawText) {
         } else if (paramStr) {
             title = paramStr;
         } else {
-            // Image was provided with just `.imgevent` and no extra text
+            // Image provided with just `.imgevent` caption
             title = 'Special Community Event';
         }
 
@@ -238,7 +239,7 @@ async function imgeventCommand(sock, chatId, message, rawText) {
             }, { quoted: message });
         }
 
-        // 4. Download Image Buffer (if an image was identified)
+        // 4. Download Image Buffer (if image present)
         let imageBuffer = null;
         if (imageMessage) {
             imageBuffer = await downloadImageBuffer(sock, targetMessage, imageMessage);
@@ -270,82 +271,42 @@ async function imgeventCommand(sock, chatId, message, rawText) {
         // 7. Configurable Join Link
         const joinLink = settings.eventJoinLink || process.env.EVENT_JOIN_LINK || 'https://zoxertech.me/buy-bots';
 
-        // 8. Generate 32-byte Cryptographic Secret (Required by WhatsApp for Going/Can't Go RSVP)
-        const messageSecret = crypto.randomBytes(32);
-
-        // 9. Prepare contextInfo (Mentions + ExternalAdReply banner if image available)
-        const contextInfo = {
-            mentionedJid: allMembers
-        };
-
+        // 8. If image is available, send promotional image banner first
         if (imageBuffer && imageBuffer.length > 0) {
-            contextInfo.externalAdReply = {
-                title: title,
-                body: description,
-                mediaType: 1, // IMAGE
-                renderLargerThumbnail: true,
-                thumbnail: imageBuffer,
-                sourceUrl: joinLink
-            };
+            try {
+                await sock.sendMessage(chatId, {
+                    image: imageBuffer,
+                    caption: `╭─〔 📅 *ZOXER PROMOTIONAL EVENT* 〕\n` +
+                             `│ 🏷️ *Event:* *${title}*\n` +
+                             `│ 📝 *Details:* ${description}\n` +
+                             `│ 🕒 *Time:* Starts in ${hoursFromNow} hr(s)\n` +
+                             `│ 🔗 *Join Link:* ${joinLink}\n` +
+                             `╰─────────────────────────\n` +
+                             `👉 *Tap "Going" on the event card below to RSVP!*`,
+                    mentions: allMembers
+                }, { quoted: message });
+            } catch (imgErr) {
+                console.warn('[IMGEVENT] Could not send image banner, proceeding with event card:', imgErr.message);
+            }
         }
 
-        // 10. Build Payload for Baileys
-        const eventContent = {
+        // 9. Send 100% Native WhatsApp Event Card with Going / Can't Go buttons
+        // WhatsApp mobile client strictly requires a clean EventMessage payload
+        const nativeEventPayload = {
             event: {
                 name: title,
                 description: description,
                 startDate: new Date(startTime * 1000),
                 endDate: new Date(endTime * 1000),
                 location: { name: 'Online' },
-                extraGuestsAllowed: true,
-                messageSecret: messageSecret
+                extraGuestsAllowed: true
             },
-            contextInfo: contextInfo
+            mentions: allMembers
         };
 
-        const botUserJid = sock.user?.id ? jidNormalizedUser(sock.user.id) : undefined;
+        await sock.sendMessage(chatId, nativeEventPayload);
 
-        // 11. Generate Native WhatsApp Message
-        let fullMsg = null;
-        try {
-            fullMsg = await generateWAMessage(chatId, eventContent, {
-                userJid: botUserJid,
-                quoted: message
-            });
-
-            if (joinLink && fullMsg.message?.eventMessage) {
-                fullMsg.message.eventMessage.joinLink = joinLink;
-            }
-        } catch (genErr) {
-            console.warn('[IMGEVENT] generateWAMessage error, falling back:', genErr.message);
-        }
-
-        // 12. Relay or Send with Meta Creation Tag
-        let sent = false;
-        if (fullMsg?.message && typeof sock.relayMessage === 'function') {
-            try {
-                await sock.relayMessage(chatId, fullMsg.message, {
-                    messageId: fullMsg.key.id,
-                    additionalNodes: [
-                        {
-                            tag: 'meta',
-                            attrs: {
-                                event_type: 'creation'
-                            }
-                        }
-                    ]
-                });
-                sent = true;
-            } catch (relayErr) {
-                console.warn('[IMGEVENT] relayMessage failed, trying sock.sendMessage fallback:', relayErr.message);
-            }
-        }
-
-        if (!sent) {
-            await sock.sendMessage(chatId, eventContent, { quoted: message });
-        }
-
-        // 13. React with Calendar Emoji to confirm success
+        // 10. React with Calendar Emoji to confirm success
         try {
             if (message?.key) {
                 await sock.sendMessage(chatId, { react: { text: '📅', key: message.key } });

@@ -4,6 +4,9 @@ const {
     extractViewOnceMedia,
     cacheViewOnceMessage,
     viewOnceCache,
+    chatLatestViewOnce,
+    loadFromDiskCache,
+    saveToDiskCache,
     isHeartCommand,
     cleanJid,
     unwrapMessage,
@@ -80,50 +83,85 @@ async function runAll() {
         assert.strictEqual(unwrapped.imageMessage.caption, 'Secret pic');
     });
 
-    // 4. Test viewOnceCache & cacheViewOnceMessage
-    test('cacheViewOnceMessage stores incoming view-once media correctly', () => {
-        viewOnceCache.clear();
-        const incomingMsg = {
-            key: { id: 'test_vo_msg_001', remoteJid: '1203639999@g.us', participant: '923232391033@s.whatsapp.net' },
+    // 4. Test saveToDiskCache & loadFromDiskCache
+    test('saveToDiskCache and loadFromDiskCache persist and retrieve media', () => {
+        const testId = 'test_disk_vo_' + Date.now();
+        const testBuf = Buffer.from('test_image_binary_data_disk');
+        saveToDiskCache(testId, {
+            chatId: '1203639999@g.us',
+            mediaType: 'image',
+            mimeType: 'image/jpeg',
+            caption: 'Persistent sunset',
+            buffer: testBuf,
+            isPtt: false
+        });
+
+        const loaded = loadFromDiskCache(testId);
+        assert.ok(loaded, 'Should load from disk cache');
+        assert.strictEqual(loaded.buffer.toString(), testBuf.toString());
+        assert.strictEqual(loaded.caption, 'Persistent sunset');
+        assert.strictEqual(loaded.mediaType, 'image');
+    });
+
+    // 5. Test extractViewOnceMedia from in-memory cache
+    await asyncTest('extractViewOnceMedia extracts media using quoted stanzaId from in-memory cache', async () => {
+        const testId = 'stanza_vo_001';
+        const testBuf = Buffer.from('mem_buffer_data_vo');
+        viewOnceCache.set(testId, {
+            msgId: testId,
+            chatId: '1203639999@g.us',
+            buffer: testBuf,
+            mediaType: 'image',
+            mimeType: 'image/jpeg',
+            caption: 'Memory pic'
+        });
+
+        const replyMsg = {
+            key: { remoteJid: '1203639999@g.us', id: 'reply_msg_1' },
             message: {
-                viewOnceMessageV2: {
-                    message: {
-                        imageMessage: {
-                            caption: 'Disappearing sunset',
-                            mimetype: 'image/jpeg',
-                            mediaKey: Buffer.from('test_media_key'),
-                            url: 'https://mmg.whatsapp.net/test'
+                extendedTextMessage: {
+                    text: '.vv',
+                    contextInfo: {
+                        stanzaId: testId,
+                        participant: '923232391033@s.whatsapp.net',
+                        quotedMessage: {
+                            imageMessage: { mimetype: 'image/jpeg' }
                         }
                     }
                 }
             }
         };
 
-        cacheViewOnceMessage(incomingMsg);
-        assert.strictEqual(viewOnceCache.has('test_vo_msg_001'), true);
-        const cached = viewOnceCache.get('test_vo_msg_001');
-        assert.strictEqual(cached.mediaType, 'image');
-        assert.strictEqual(cached.caption, 'Disappearing sunset');
+        const extracted = await extractViewOnceMedia(replyMsg);
+        assert.ok(extracted, 'Must extract successfully');
+        assert.strictEqual(extracted.buffer.toString(), testBuf.toString());
+        assert.strictEqual(extracted.caption, 'Memory pic');
     });
 
-    // 5. Test getContextInfo
-    test('getContextInfo retrieves contextInfo from normal and ephemeral messages', () => {
-        const replyInEphemeral = {
+    // 6. Test extractViewOnceMedia fallback to chatLatestViewOnce
+    await asyncTest('extractViewOnceMedia falls back to chatLatestViewOnce when stanzaId differs', async () => {
+        const testBuf = Buffer.from('chat_latest_buffer_data');
+        chatLatestViewOnce.set('1203638888@g.us', {
+            msgId: 'some_other_id',
+            chatId: '1203638888@g.us',
+            buffer: testBuf,
+            mediaType: 'video',
+            mimeType: 'video/mp4',
+            caption: 'Latest video',
+            timestamp: Date.now()
+        });
+
+        const replyWithAlteredStanza = {
+            key: { remoteJid: '1203638888@g.us', id: 'reply_msg_2' },
             message: {
-                ephemeralMessage: {
-                    message: {
-                        extendedTextMessage: {
-                            text: '.vv',
-                            contextInfo: {
-                                stanzaId: 'test_vo_msg_001',
-                                participant: '923232391033@s.whatsapp.net',
-                                quotedMessage: {
-                                    viewOnceMessageV2: {
-                                        message: {
-                                            imageMessage: { caption: 'Quoted VO' }
-                                        }
-                                    }
-                                }
+                extendedTextMessage: {
+                    text: '.vv',
+                    contextInfo: {
+                        stanzaId: 'unknown_mobile_client_id_999',
+                        participant: '923232391033@s.whatsapp.net',
+                        quotedMessage: {
+                            viewOnceMessageV2: {
+                                message: { imageMessage: { mimetype: 'image/jpeg' } }
                             }
                         }
                     }
@@ -131,12 +169,13 @@ async function runAll() {
             }
         };
 
-        const ctx = getContextInfo(replyInEphemeral);
-        assert.ok(ctx, 'Should retrieve contextInfo from inside ephemeral message');
-        assert.strictEqual(ctx.stanzaId, 'test_vo_msg_001');
+        const extracted = await extractViewOnceMedia(replyWithAlteredStanza);
+        assert.ok(extracted, 'Should extract from chatLatestViewOnce fallback');
+        assert.strictEqual(extracted.buffer.toString(), testBuf.toString());
+        assert.strictEqual(extracted.caption, 'Latest video');
     });
 
-    // 6. Test viewonceCommand mode setting
+    // 7. Test viewonceCommand mode setting
     await asyncTest('viewonceCommand handles mode toggling (public vs private)', async () => {
         const sent = [];
         const mockSock = {
@@ -167,6 +206,47 @@ async function runAll() {
         await viewonceCommand(mockSock, '1203639999@g.us', msgPublic);
         assert.strictEqual(sent.length, 2);
         assert.ok(sent[1].content.text.includes('PUBLIC'));
+    });
+
+    // 8. Test viewonceCommand public extraction send
+    await asyncTest('viewonceCommand sends media in same chat when mode is public', async () => {
+        const sent = [];
+        const mockSock = {
+            sendMessage: async (jid, content, options) => {
+                sent.push({ jid, content, options });
+                return { key: { id: 'sent_' + Date.now() } };
+            }
+        };
+
+        const testId = 'public_test_id_' + Date.now();
+        const testBuf = Buffer.from('sample_photo_bytes');
+        viewOnceCache.set(testId, {
+            msgId: testId,
+            chatId: '1203637777@g.us',
+            buffer: testBuf,
+            mediaType: 'image',
+            mimeType: 'image/jpeg',
+            caption: 'Public photo'
+        });
+
+        const replyMsg = {
+            key: { remoteJid: '1203637777@g.us', participant: '923001234567@s.whatsapp.net', id: 'reply_public' },
+            message: {
+                extendedTextMessage: {
+                    text: '.vv',
+                    contextInfo: {
+                        stanzaId: testId,
+                        quotedMessage: { imageMessage: { mimetype: 'image/jpeg' } }
+                    }
+                }
+            }
+        };
+
+        await viewonceCommand(mockSock, '1203637777@g.us', replyMsg);
+        assert.strictEqual(sent.length, 1);
+        assert.strictEqual(sent[0].jid, '1203637777@g.us');
+        assert.ok(sent[0].content.image, 'Must send image buffer');
+        assert.strictEqual(sent[0].content.image.toString(), testBuf.toString());
     });
 
     console.log('\n========================================================');

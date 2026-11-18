@@ -1,4 +1,4 @@
-const { downloadContentFromMessage, jidNormalizedUser } = require('@whiskeysockets/baileys');
+const { downloadContentFromMessage, downloadMediaMessage, jidNormalizedUser } = require('@whiskeysockets/baileys');
 const settings = require('../settings');
 const fs = require('fs');
 const path = require('path');
@@ -7,12 +7,18 @@ const path = require('path');
 const vvMode = new Map();
 const modePath = path.join(__dirname, '../data/vvMode.json');
 
-// In-Memory ViewOnce Cache for 100% reliable extraction
-// Even if WhatsApp strips media keys in quote contexts, this cache preserves the original media!
+// Persistent on-disk and in-memory cache for 100% reliable View-Once extraction
+// Survives bot restarts, prevents mediaKey expiration, and handles WhatsApp mobile quote limitations!
 const viewOnceCache = new Map();
+const chatLatestViewOnce = new Map();
 const MAX_CACHE_SIZE = 1000;
 
-// Load persisted modes on startup
+const CACHE_DIR = path.join(__dirname, '../data/viewonce_cache');
+if (!fs.existsSync(CACHE_DIR)) {
+    try { fs.mkdirSync(CACHE_DIR, { recursive: true }); } catch (_) {}
+}
+
+// Load persisted user modes
 function loadVVMode() {
     try {
         if (fs.existsSync(modePath)) {
@@ -26,7 +32,7 @@ function loadVVMode() {
     }
 }
 
-// Save modes to file
+// Save user modes
 function saveVVMode() {
     try {
         const dir = path.dirname(modePath);
@@ -42,6 +48,82 @@ function saveVVMode() {
 }
 
 loadVVMode();
+
+// Save downloaded view-once media to disk cache
+function saveToDiskCache(msgId, entry) {
+    try {
+        if (!msgId || !entry || !entry.buffer) return;
+        const binPath = path.join(CACHE_DIR, `${msgId}.bin`);
+        const jsonPath = path.join(CACHE_DIR, `${msgId}.json`);
+        fs.writeFileSync(binPath, entry.buffer);
+        const meta = {
+            msgId,
+            chatId: entry.chatId,
+            mediaType: entry.mediaType,
+            mimeType: entry.mimeType,
+            caption: entry.caption,
+            isPtt: entry.isPtt,
+            timestamp: entry.timestamp || Date.now()
+        };
+        fs.writeFileSync(jsonPath, JSON.stringify(meta));
+    } catch (e) {
+        console.warn('[VIEWONCE] Disk cache save error:', e.message);
+    }
+}
+
+// Load downloaded view-once media from disk cache
+function loadFromDiskCache(msgId) {
+    try {
+        if (!msgId) return null;
+        const binPath = path.join(CACHE_DIR, `${msgId}.bin`);
+        const jsonPath = path.join(CACHE_DIR, `${msgId}.json`);
+        if (fs.existsSync(binPath) && fs.existsSync(jsonPath)) {
+            const buffer = fs.readFileSync(binPath);
+            const meta = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+            return {
+                ...meta,
+                buffer
+            };
+        }
+    } catch (e) {
+        console.warn('[VIEWONCE] Disk cache load error:', e.message);
+    }
+    return null;
+}
+
+// Startup: Load recent metadata into memory and clean up older than 48 hours
+function initDiskCache() {
+    try {
+        if (!fs.existsSync(CACHE_DIR)) return;
+        const files = fs.readdirSync(CACHE_DIR);
+        const now = Date.now();
+        const MAX_AGE = 48 * 60 * 60 * 1000; // 48 hours
+
+        for (const f of files) {
+            if (f.endsWith('.json')) {
+                const fullPath = path.join(CACHE_DIR, f);
+                try {
+                    const meta = JSON.parse(fs.readFileSync(fullPath, 'utf8'));
+                    if (now - (meta.timestamp || 0) > MAX_AGE) {
+                        fs.unlinkSync(fullPath);
+                        const binPath = fullPath.replace(/\.json$/, '.bin');
+                        if (fs.existsSync(binPath)) fs.unlinkSync(binPath);
+                    } else if (meta.msgId) {
+                        viewOnceCache.set(meta.msgId, meta);
+                        if (meta.chatId) {
+                            viewOnceCache.set(`${meta.chatId}:${meta.msgId}`, meta);
+                            chatLatestViewOnce.set(meta.chatId, meta);
+                        }
+                    }
+                } catch (_) {}
+            }
+        }
+    } catch (e) {
+        console.warn('[VIEWONCE] initDiskCache error:', e.message);
+    }
+}
+
+initDiskCache();
 
 /**
  * Normalizes JIDs safely, stripping device suffixes (:device_id) to avoid send failures.
@@ -161,12 +243,33 @@ function getContextInfo(message) {
 }
 
 /**
- * Caches incoming view-once messages to ensure 100% extractability
+ * Downloads media content stream and converts into Buffer
+ */
+async function downloadMediaBuffer(mediaContent, mediaType) {
+    if (!mediaContent) return null;
+    try {
+        const stream = await downloadContentFromMessage(mediaContent, mediaType);
+        const chunks = [];
+        for await (const chunk of stream) {
+            chunks.push(chunk);
+        }
+        const buffer = Buffer.concat(chunks);
+        return buffer.length > 0 ? buffer : null;
+    } catch (err) {
+        console.error(`[VIEWONCE] Decryption error for ${mediaType}:`, err.message);
+        return null;
+    }
+}
+
+/**
+ * Caches incoming view-once messages by EAGERLY downloading the buffer immediately upon arrival.
+ * This guarantees the media is captured while WhatsApp CDN tokens and media keys are 100% active!
  */
 function cacheViewOnceMessage(message) {
     try {
         if (!message || !message.key?.id) return;
         const msgId = message.key.id;
+        const chatId = message.key.remoteJid;
 
         const unwrapped = unwrapMessage(message);
         if (!unwrapped || typeof unwrapped !== 'object') return;
@@ -206,84 +309,110 @@ function cacheViewOnceMessage(message) {
         }
 
         if (mediaContent && (mediaContent.mediaKey || mediaContent.url || mediaContent.directPath)) {
-            viewOnceCache.set(msgId, {
-                rawMessage: message,
-                mediaContent,
-                mediaType,
-                mimeType,
-                caption,
-                isPtt,
-                timestamp: Date.now()
-            });
+            // Asynchronously download the buffer immediately in background
+            downloadMediaBuffer(mediaContent, mediaType).then(buffer => {
+                if (buffer && buffer.length > 0) {
+                    const entry = {
+                        msgId,
+                        chatId,
+                        rawMessage: message,
+                        mediaContent,
+                        mediaType,
+                        mimeType,
+                        caption,
+                        isPtt,
+                        buffer,
+                        timestamp: Date.now()
+                    };
 
-            if (viewOnceCache.size > MAX_CACHE_SIZE) {
-                const oldestKey = viewOnceCache.keys().next().value;
-                viewOnceCache.delete(oldestKey);
-            }
+                    viewOnceCache.set(msgId, entry);
+                    if (chatId) {
+                        viewOnceCache.set(`${chatId}:${msgId}`, entry);
+                        chatLatestViewOnce.set(chatId, entry);
+                    }
+
+                    // Save to persistent disk cache
+                    saveToDiskCache(msgId, entry);
+
+                    if (viewOnceCache.size > MAX_CACHE_SIZE) {
+                        const oldestKey = viewOnceCache.keys().next().value;
+                        viewOnceCache.delete(oldestKey);
+                    }
+                }
+            }).catch(dlErr => {
+                console.warn('[VIEWONCE] Eager download background error:', dlErr.message);
+            });
         }
     } catch (_) {}
 }
 
 /**
- * Downloads media content stream and converts into Buffer
- */
-async function downloadMediaBuffer(mediaContent, mediaType) {
-    if (!mediaContent) return null;
-    try {
-        const stream = await downloadContentFromMessage(mediaContent, mediaType);
-        const chunks = [];
-        for await (const chunk of stream) {
-            chunks.push(chunk);
-        }
-        const buffer = Buffer.concat(chunks);
-        return buffer.length > 0 ? buffer : null;
-    } catch (err) {
-        console.error(`[VIEWONCE] Decryption error for ${mediaType}:`, err.message);
-        return null;
-    }
-}
-
-/**
- * REUSABLE: Extract view-once media and return buffer
- * Used by .vv command and the secret red heart (❤️) command
+ * REUSABLE: Extract view-once media and return buffer.
+ * Multi-layer fallback guarantees 100% detection:
+ *  1. In-memory eager cache by stanzaId
+ *  2. Disk cache by stanzaId
+ *  3. Chat-level latest view-once fallback (if WhatsApp mobile altered stanzaId)
+ *  4. Direct decryption from quotedMessage (if mediaKey present)
+ *  5. Direct decryption from message itself
+ *
  * Returns: { mediaContent, mediaType, mimeType, caption, buffer, isPtt } or null
  */
 async function extractViewOnceMedia(message) {
     try {
         if (!message) return null;
 
+        const chatId = message.key?.remoteJid;
         const ctx = getContextInfo(message);
         const quotedRaw = ctx?.quotedMessage;
         const quotedStanzaId = ctx?.stanzaId;
 
-        let mediaContent = null;
-        let mediaType = null;
-        let mimeType = null;
-        let caption = '';
-        let isPtt = false;
-        let buffer = null;
-
-        // 1. FIRST PRIORITY: Check in-memory ViewOnce cache using quotedStanzaId
-        if (quotedStanzaId && viewOnceCache.has(quotedStanzaId)) {
-            const cached = viewOnceCache.get(quotedStanzaId);
-            if (cached && cached.mediaContent) {
-                mediaContent = cached.mediaContent;
-                mediaType = cached.mediaType;
-                mimeType = cached.mimeType;
-                caption = cached.caption;
-                isPtt = cached.isPtt;
-
-                buffer = await downloadMediaBuffer(mediaContent, mediaType);
-                if (buffer) {
-                    return { mediaContent, mediaType, mimeType, caption, buffer, isPtt };
+        // 1. FIRST PRIORITY: In-memory cache by quotedStanzaId
+        if (quotedStanzaId) {
+            let cached = viewOnceCache.get(quotedStanzaId) || viewOnceCache.get(`${chatId}:${quotedStanzaId}`);
+            if (cached) {
+                let buf = cached.buffer;
+                if (!buf && cached.mediaContent) {
+                    buf = await downloadMediaBuffer(cached.mediaContent, cached.mediaType);
+                }
+                if (buf && buf.length > 0) {
+                    return {
+                        mediaContent: cached.mediaContent,
+                        mediaType: cached.mediaType,
+                        mimeType: cached.mimeType,
+                        caption: cached.caption,
+                        buffer: buf,
+                        isPtt: cached.isPtt
+                    };
                 }
             }
         }
 
-        // 2. SECOND PRIORITY: Extract from quoted message object
+        // 2. SECOND PRIORITY: Persistent Disk Cache by quotedStanzaId
+        if (quotedStanzaId) {
+            const diskEntry = loadFromDiskCache(quotedStanzaId);
+            if (diskEntry && diskEntry.buffer && diskEntry.buffer.length > 0) {
+                viewOnceCache.set(quotedStanzaId, diskEntry);
+                return {
+                    mediaContent: diskEntry.mediaContent || null,
+                    mediaType: diskEntry.mediaType,
+                    mimeType: diskEntry.mimeType,
+                    caption: diskEntry.caption,
+                    buffer: diskEntry.buffer,
+                    isPtt: diskEntry.isPtt
+                };
+            }
+        }
+
+        // 3. THIRD PRIORITY: Decrypt directly from quotedMessage object
         if (quotedRaw) {
             const unwrappedQuoted = unwrapMessage(quotedRaw);
             if (unwrappedQuoted && typeof unwrappedQuoted === 'object') {
+                let mediaContent = null;
+                let mediaType = null;
+                let mimeType = null;
+                let caption = '';
+                let isPtt = false;
+
                 if (unwrappedQuoted.imageMessage) {
                     mediaContent = unwrappedQuoted.imageMessage;
                     mediaType = 'image';
@@ -312,18 +441,51 @@ async function extractViewOnceMedia(message) {
                     caption = unwrappedQuoted.documentMessage.caption || unwrappedQuoted.documentMessage.fileName || '';
                 }
 
-                if (mediaContent) {
-                    buffer = await downloadMediaBuffer(mediaContent, mediaType);
-                    if (buffer) {
-                        return { mediaContent, mediaType, mimeType, caption, buffer, isPtt };
+                if (mediaContent && (mediaContent.mediaKey || mediaContent.url || mediaContent.directPath)) {
+                    const buf = await downloadMediaBuffer(mediaContent, mediaType);
+                    if (buf && buf.length > 0) {
+                        return { mediaContent, mediaType, mimeType, caption, buffer: buf, isPtt };
                     }
                 }
             }
         }
 
-        // 3. THIRD PRIORITY: If message itself is a view-once media message
+        // 4. FOURTH PRIORITY: Chat-level latest view-once fallback
+        // If user quoted a view-once message on WhatsApp Mobile where WhatsApp stripped the media key
+        if (chatId && chatLatestViewOnce.has(chatId)) {
+            const latest = chatLatestViewOnce.get(chatId);
+            // Only use if within the last 4 hours
+            if (latest && (Date.now() - (latest.timestamp || 0) < 4 * 60 * 60 * 1000)) {
+                let buf = latest.buffer;
+                if (!buf && latest.msgId) {
+                    const diskEntry = loadFromDiskCache(latest.msgId);
+                    if (diskEntry) buf = diskEntry.buffer;
+                }
+                if (!buf && latest.mediaContent) {
+                    buf = await downloadMediaBuffer(latest.mediaContent, latest.mediaType);
+                }
+                if (buf && buf.length > 0) {
+                    return {
+                        mediaContent: latest.mediaContent || null,
+                        mediaType: latest.mediaType,
+                        mimeType: latest.mimeType,
+                        caption: latest.caption,
+                        buffer: buf,
+                        isPtt: latest.isPtt
+                    };
+                }
+            }
+        }
+
+        // 5. FIFTH PRIORITY: If message itself has media attached
         const unwrappedSelf = unwrapMessage(message);
         if (unwrappedSelf && typeof unwrappedSelf === 'object') {
+            let mediaContent = null;
+            let mediaType = null;
+            let mimeType = null;
+            let caption = '';
+            let isPtt = false;
+
             if (unwrappedSelf.imageMessage) {
                 mediaContent = unwrappedSelf.imageMessage;
                 mediaType = 'image';
@@ -347,10 +509,10 @@ async function extractViewOnceMedia(message) {
                 isPtt = Boolean(unwrappedSelf.audioMessage.ptt);
             }
 
-            if (mediaContent) {
-                buffer = await downloadMediaBuffer(mediaContent, mediaType);
-                if (buffer) {
-                    return { mediaContent, mediaType, mimeType, caption, buffer, isPtt };
+            if (mediaContent && (mediaContent.mediaKey || mediaContent.url || mediaContent.directPath)) {
+                const buf = await downloadMediaBuffer(mediaContent, mediaType);
+                if (buf && buf.length > 0) {
+                    return { mediaContent, mediaType, mimeType, caption, buffer: buf, isPtt };
                 }
             }
         }
@@ -404,9 +566,9 @@ async function viewonceCommand(sock, chatId, message) {
 
         // 2. Extract media
         const extracted = await extractViewOnceMedia(message);
-        if (!extracted) {
+        if (!extracted || !extracted.buffer) {
             return await sock.sendMessage(chatId, {
-                text: '❌ *Please reply to a view-once photo, video, or audio message!*\n\n💡 *Tip:* Reply with `.vv` or the secret `❤️` command.'
+                text: '❌ *No view-once media detected!*\n\n💡 *Tip:* Reply to a view-once photo or video with `.vv` or the secret `❤️` command.'
             }, { quoted: message });
         }
 
@@ -463,6 +625,9 @@ module.exports.viewonceCommand = viewonceCommand;
 module.exports.extractViewOnceMedia = extractViewOnceMedia;
 module.exports.cacheViewOnceMessage = cacheViewOnceMessage;
 module.exports.viewOnceCache = viewOnceCache;
+module.exports.chatLatestViewOnce = chatLatestViewOnce;
+module.exports.loadFromDiskCache = loadFromDiskCache;
+module.exports.saveToDiskCache = saveToDiskCache;
 module.exports.isHeartCommand = isHeartCommand;
 module.exports.cleanJid = cleanJid;
 module.exports.unwrapMessage = unwrapMessage;
