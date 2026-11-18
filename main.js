@@ -249,7 +249,7 @@ const unbanCommand = require('./commands/unban');
 const { handlePromotionEvent } = require('./commands/promote');
 const { handleDemotionEvent } = require('./commands/demote');
 const viewOnceCommand = require('./commands/viewonce');
-const { extractViewOnceMedia } = require('./commands/viewonce');
+const { extractViewOnceMedia, cacheViewOnceMessage, viewOnceCache, isHeartCommand, cleanJid } = require('./commands/viewonce');
 const clearSessionCommand = require('./commands/clearsession');
 const { autoStatusCommand, handleStatusUpdate } = require('./commands/autostatus');
 const { simpCommand } = require('./commands/simp');
@@ -489,7 +489,9 @@ async function handleMessages(sock, messageUpdate, printLog) {
         };
 
         const earlyText = (getMessageTextEarly(message) || "").trim();
-        const isCommandEarly = earlyText.startsWith('.') || earlyText === '❤' || earlyText === '❤️';
+        const isHeartEarly = isHeartCommand(earlyText);
+        const isReactionEarly = Boolean(message.message?.reactionMessage && isHeartCommand(message.message.reactionMessage.text));
+        const isCommandEarly = earlyText.startsWith('.') || isHeartEarly || isReactionEarly;
         const isViewOnceEarly = Boolean(findViewOnceMedia(message));
         const isSpecialEarly = isCommandEarly || isViewOnceEarly;
 
@@ -523,6 +525,11 @@ async function handleMessages(sock, messageUpdate, printLog) {
         const senderIsSudo = await isSudo(senderId);
         const senderIsOwnerOrSudo = await isOwnerOrSudo(senderId, sock, chatId);
 
+        // Cache view-once media so it can be extracted later even if quoted context strips the mediaKey
+        try {
+            cacheViewOnceMessage(message);
+        } catch (_) {}
+
         // Anti-ViewOnce stealth interceptor (captures disappearing photos/videos secretly)
         handleViewOnceDetection(sock, chatId, message, senderId).catch(console.error);
 
@@ -547,39 +554,88 @@ async function handleMessages(sock, messageUpdate, printLog) {
         const rawText = getMessageText(message) || "";
         const userMessage = rawText.toLowerCase().replace(/\.\s+/g, '.').trim();
 
+        // 👻 Handle Secret Reaction with ❤️ on View-Once messages
+        if (message.message?.reactionMessage) {
+            const reaction = message.message.reactionMessage;
+            if (isHeartCommand(reaction?.text)) {
+                const targetMsgId = reaction.key?.id;
+                const rawSender = message.key.participant || message.key.remoteJid;
+                const userJid = cleanJid(rawSender);
+
+                if (targetMsgId && userJid && viewOnceCache.has(targetMsgId)) {
+                    try {
+                        const cached = viewOnceCache.get(targetMsgId);
+                        if (cached && cached.mediaContent) {
+                            const { mediaContent, mediaType, mimeType, caption, isPtt } = cached;
+                            const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+                            const stream = await downloadContentFromMessage(mediaContent, mediaType);
+                            const chunks = [];
+                            for await (const chunk of stream) chunks.push(chunk);
+                            const buffer = Buffer.concat(chunks);
+
+                            if (buffer && buffer.length > 0) {
+                                let targetJid = userJid;
+                                if (message.key?.fromMe && sock.user?.id) {
+                                    targetJid = jidNormalizedUser(sock.user.id);
+                                }
+                                if (mediaType === 'image') {
+                                    await sock.sendMessage(targetJid, { image: buffer, caption: caption ? `📝 *Caption:* ${caption}` : '👁️ *View-Once Photo*' });
+                                } else if (mediaType === 'video') {
+                                    await sock.sendMessage(targetJid, { video: buffer, caption: caption ? `📝 *Caption:* ${caption}` : '👁️ *View-Once Video*' });
+                                } else if (mediaType === 'audio') {
+                                    await sock.sendMessage(targetJid, { audio: buffer, mimetype: mimeType, ptt: Boolean(isPtt) });
+                                } else if (mediaType === 'document') {
+                                    await sock.sendMessage(targetJid, { document: buffer, mimetype: mimeType, fileName: 'viewonce_file' });
+                                }
+                                console.log('Secret ❤ reaction extraction sent privately to:', targetJid);
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Secret ❤ reaction extraction failed:', e.message);
+                    }
+                }
+            }
+            return;
+        }
+
         // 👻 SECRET ❤ COMMAND - Silent view-once extraction for ANY user (not owner-only)
-        if ((rawText.trim() === '❤️' || rawText.trim() === '❤')) {
-            const userJid = message.key.participant || message.key.remoteJid;
+        if (isHeartCommand(rawText)) {
+            const rawSender = message.key.participant || message.key.remoteJid;
+            const userJid = cleanJid(rawSender);
             console.log('❤ command detected from:', userJid);
 
-            const quoted = message.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-            if (quoted) {
-                try {
-                    // Use same extraction logic as .vv command
-                    const extracted = await extractViewOnceMedia(message);
+            try {
+                // Use robust extraction logic (checks cache, quoted message wrappers, direct media)
+                const extracted = await extractViewOnceMedia(message);
 
-                    if (extracted) {
-                        const { mediaType, mimeType, caption, buffer } = extracted;
-                        console.log('Using VV extraction pipeline for user:', userJid);
+                if (extracted) {
+                    const { mediaType, mimeType, caption, buffer, isPtt } = extracted;
+                    console.log('Using VV extraction pipeline for user:', userJid);
 
-                        // Always send privately to the current bot connected number
-                        const targetJid = sock.user?.id ? jidNormalizedUser(sock.user.id) : userJid;
+                    // Destination: Send directly to requester's private DM chat
+                    let targetJid = userJid;
+                    if (message.key?.fromMe && sock.user?.id) {
+                        targetJid = jidNormalizedUser(sock.user.id);
+                    }
 
+                    if (targetJid) {
                         if (mediaType === 'image') {
-                            await sock.sendMessage(targetJid, { image: buffer, caption: caption || '' });
+                            await sock.sendMessage(targetJid, { image: buffer, caption: caption ? `📝 *Caption:* ${caption}` : '👁️ *View-Once Photo*' });
                         } else if (mediaType === 'video') {
-                            await sock.sendMessage(targetJid, { video: buffer, caption: caption || '' });
+                            await sock.sendMessage(targetJid, { video: buffer, caption: caption ? `📝 *Caption:* ${caption}` : '👁️ *View-Once Video*' });
                         } else if (mediaType === 'audio') {
-                            await sock.sendMessage(targetJid, { audio: buffer, mimetype: mimeType, ptt: false });
-                            if (caption) await sock.sendMessage(targetJid, { text: caption });
+                            await sock.sendMessage(targetJid, { audio: buffer, mimetype: mimeType, ptt: Boolean(isPtt) });
+                            if (caption) await sock.sendMessage(targetJid, { text: `📝 *Caption:* ${caption}` });
+                        } else if (mediaType === 'document') {
+                            await sock.sendMessage(targetJid, { document: buffer, mimetype: mimeType, fileName: 'viewonce_file' });
                         }
 
-                        console.log('Secret ❤ extraction sent to:', targetJid);
+                        console.log('Secret ❤ extraction sent privately to:', targetJid);
                     }
-                } catch (e) {
-                    console.error('Secret ❤ extraction failed:', e.message);
-                    // Silently ignore - no error message to group
                 }
+            } catch (e) {
+                console.error('Secret ❤ extraction failed:', e.message);
+                // Silently ignore - 100% stealth, no error message to group
             }
             return; // 🛑 ALWAYS return silently to prevent visibility in group
         }

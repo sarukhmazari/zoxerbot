@@ -250,6 +250,70 @@ function findViewOnceMedia(message) {
 }
 
 /**
+ * Inspect any media message (both normal and view-once)
+ */
+function inspectMediaMessage(message) {
+    if (!message) return null;
+    const { content, wrappers } = unwrapMessage(message);
+    if (!content || typeof content !== 'object') return null;
+
+    const hasViewOnceWrapper = wrappers.some(w =>
+        w === 'viewOnceMessage' ||
+        w === 'viewOnceMessageV2' ||
+        w === 'viewOnceMessageV2Extension'
+    );
+
+    let mediaContent = null;
+    let mediaType = null;
+    let mimeType = null;
+    let caption = '';
+
+    if (content.imageMessage) {
+        mediaContent = content.imageMessage;
+        mediaType = 'image';
+        mimeType = content.imageMessage.mimetype || 'image/jpeg';
+        caption = content.imageMessage.caption || '';
+    } else if (content.videoMessage) {
+        mediaContent = content.videoMessage;
+        mediaType = 'video';
+        mimeType = content.videoMessage.mimetype || 'video/mp4';
+        caption = content.videoMessage.caption || '';
+    } else if (content.ptvMessage) {
+        mediaContent = content.ptvMessage;
+        mediaType = 'video';
+        mimeType = content.ptvMessage.mimetype || 'video/mp4';
+        caption = content.ptvMessage.caption || '';
+    } else if (content.audioMessage) {
+        mediaContent = content.audioMessage;
+        mediaType = 'audio';
+        mimeType = content.audioMessage.mimetype || 'audio/ogg; codecs=opus';
+        caption = '';
+    } else if (content.documentMessage) {
+        mediaContent = content.documentMessage;
+        mediaType = 'document';
+        mimeType = content.documentMessage.mimetype || 'application/octet-stream';
+        caption = content.documentMessage.caption || content.documentMessage.fileName || '';
+    }
+
+    if (!mediaContent) return null;
+
+    const isViewOnce = Boolean(
+        hasViewOnceWrapper ||
+        mediaContent.viewOnce ||
+        mediaContent.viewOnceMessage
+    );
+
+    return {
+        mediaContent,
+        mediaType,
+        mimeType,
+        caption,
+        isViewOnce,
+        wrapperStructure: wrappers.length > 0 ? wrappers.join(' -> ') : 'direct'
+    };
+}
+
+/**
  * Command: .antiviewonce / .antivo
  * Usage:
  *   .antiviewonce on       -> Enable detection for this chat
@@ -530,6 +594,7 @@ module.exports = {
     antiviewonceCommand,
     handleViewOnceDetection,
     findViewOnceMedia,
+    inspectMediaMessage,
     unwrapMessage,
     cleanJid,
     isChatEnabled,
