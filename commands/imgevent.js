@@ -1,6 +1,8 @@
+const crypto = require('crypto');
 const {
     downloadMediaMessage,
     downloadContentFromMessage,
+    generateWAMessage,
     generateWAMessageFromContent,
     proto,
     jidNormalizedUser
@@ -8,7 +10,7 @@ const {
 const settings = require('../settings');
 
 /**
- * Recursively unwrap message layers (ephemeral, viewOnce, documentWithCaption, etc.)
+ * Recursively unwrap message layers (ephemeral, viewOnce, documentWithCaption, edited, etc.)
  */
 function unwrapMessage(msg) {
     if (!msg) return null;
@@ -95,7 +97,7 @@ async function downloadImageBuffer(sock, targetMessage, imageMessage) {
         }
     } catch (_) {}
 
-    // Strategy 2: downloadContentFromMessage stream
+    // Strategy 2: downloadContentFromMessage stream directly from imageMessage
     try {
         if (imageMessage) {
             const stream = await downloadContentFromMessage(imageMessage, 'image');
@@ -111,9 +113,13 @@ async function downloadImageBuffer(sock, targetMessage, imageMessage) {
 
 /**
  * Command: .imgevent / .promoevent
+ * Creates a native WhatsApp Event Card in group chats with Going / Can't Go buttons,
+ * participant mentions, start/end timestamps, location, and optional promo image.
+ *
  * Usage:
  *   Reply to an image with: .imgevent Title | Description | HoursFromNow
  *   Or send an image with caption: .imgevent Title | Description | HoursFromNow
+ *   Also supports: .imgevent Title (without pipes)
  */
 async function imgeventCommand(sock, chatId, message, rawText) {
     try {
@@ -153,49 +159,69 @@ async function imgeventCommand(sock, chatId, message, rawText) {
             }
         }
 
-        // If no image found, send usage instructions
-        if (!imageMessage) {
+        // 3. Extract and Parse Arguments
+        const fullText = (
+            rawText ||
+            unwrappedSelf?.conversation ||
+            unwrappedSelf?.extendedTextMessage?.text ||
+            imageMessage?.caption ||
+            ''
+        ).trim();
+
+        // Strip command prefix (.imgevent or .promoevent)
+        const paramStr = fullText.replace(/^\.(imgevent|promoevent)\s*/i, '').trim();
+
+        // If no title text and no image provided, show usage help
+        if (!paramStr && !imageMessage) {
             return await sock.sendMessage(chatId, {
                 text: `╭─〔 📅 *ZOXER PROMOTIONAL EVENT* 〕\n` +
                       `│\n` +
-                      `│ ❌ *No image attached or replied to!*\n` +
+                      `│ ❌ *No image or event details provided!*\n` +
                       `│\n` +
                       `│ 📌 *How to use:*\n` +
-                      `│ Reply to an image with:\n` +
-                      `│ \`.imgevent Title | Description | HoursFromNow\`\n` +
+                      `│ • *With image banner:*\n` +
+                      `│   Reply to an image with:\n` +
+                      `│   \`.imgevent Title | Description | HoursFromNow\`\n` +
+                      `│   *Or* send an image with caption:\n` +
+                      `│   \`.imgevent Title | Description | HoursFromNow\`\n` +
                       `│\n` +
-                      `│ *Or* send an image with caption:\n` +
-                      `│ \`.imgevent Title | Description | HoursFromNow\`\n` +
+                      `│ • *Simple / Quick format:*\n` +
+                      `│   \`.imgevent Title\`\n` +
                       `│\n` +
                       `│ 💡 *Example:*\n` +
-                      `│ \`.imgevent Mega Bot Sale | Tap Going to claim 50% off! | 2\`\n` +
+                      `│ \`.imgevent Mega Bot Launch | Tap Going to join! | 2\`\n` +
                       `│\n` +
                       `╰─────────────────────────`
             }, { quoted: message });
         }
 
-        // 3. Download the Image Buffer
-        const imageBuffer = await downloadImageBuffer(sock, targetMessage, imageMessage);
-        if (!imageBuffer || imageBuffer.length === 0) {
-            return await sock.sendMessage(chatId, {
-                text: '❌ *Failed to download the image. Please try again with another image.*'
-            }, { quoted: message });
+        // Parse arguments (supports pipe-separated and plain string)
+        let title = '';
+        let description = 'Tap Going to get notified and join!';
+        let hoursFromNow = 1;
+
+        if (paramStr.includes('|')) {
+            const parts = paramStr.split('|').map(p => p.trim());
+            title = parts[0] || '';
+            if (parts.length === 2) {
+                const maybeHours = parseFloat(parts[1]);
+                if (!isNaN(maybeHours) && maybeHours > 0) {
+                    hoursFromNow = maybeHours;
+                } else if (parts[1]) {
+                    description = parts[1];
+                }
+            } else if (parts.length >= 3) {
+                if (parts[1]) description = parts[1];
+                const hoursArg = parseFloat(parts[2]);
+                if (!isNaN(hoursArg) && hoursArg > 0) hoursFromNow = hoursArg;
+            }
+        } else if (paramStr) {
+            title = paramStr;
+        } else {
+            // Image was provided with just `.imgevent` and no extra text
+            title = 'Special Community Event';
         }
 
-        // 4. Extract and Parse Arguments (Pipe-separated)
-        const fullText = (
-            rawText ||
-            unwrappedSelf?.conversation ||
-            unwrappedSelf?.extendedTextMessage?.text ||
-            imageMessage.caption ||
-            ''
-        ).trim();
-
-        // Strip the command prefix (.imgevent or .promoevent)
-        const paramStr = fullText.replace(/^\.(imgevent|promoevent)\s*/i, '').trim();
-        const parts = paramStr.split('|').map(p => p.trim());
-
-        const title = parts[0] || '';
         if (!title) {
             return await sock.sendMessage(chatId, {
                 text: `╭─〔 📅 *ZOXER PROMOTIONAL EVENT* 〕\n` +
@@ -206,22 +232,24 @@ async function imgeventCommand(sock, chatId, message, rawText) {
                       `│ \`.imgevent Title | Description | HoursFromNow\`\n` +
                       `│\n` +
                       `│ 💡 *Example:*\n` +
-                      `│ \`.imgevent Special Community Meetup | Join us for exciting bot updates! | 1.5\`\n` +
+                      `│ \`.imgevent Special Community Meetup | Join us for bot updates! | 1\`\n` +
                       `│\n` +
                       `╰─────────────────────────`
             }, { quoted: message });
         }
 
-        const description = parts[1] || 'Tap Going to get notified and join!';
-        const hoursArg = parts[2] ? parseFloat(parts[2]) : 1;
-        const hoursFromNow = (!isNaN(hoursArg) && hoursArg > 0) ? hoursArg : 1;
+        // 4. Download Image Buffer (if an image was identified)
+        let imageBuffer = null;
+        if (imageMessage) {
+            imageBuffer = await downloadImageBuffer(sock, targetMessage, imageMessage);
+        }
 
-        // 5. Calculate Timestamps
+        // 5. Calculate Timestamps (Seconds since epoch)
         const nowSec = Math.floor(Date.now() / 1000);
         const startTime = nowSec + Math.round(hoursFromNow * 3600);
-        const endTime = startTime + 7200; // 2 hours duration
+        const endTime = startTime + 7200; // 2 hours event duration
 
-        // 6. Fetch Group Participants for Group-Wide Invite
+        // 6. Fetch Group Participants for Group-Wide Tag
         let allMembers = [];
         try {
             let meta = null;
@@ -242,47 +270,87 @@ async function imgeventCommand(sock, chatId, message, rawText) {
         // 7. Configurable Join Link
         const joinLink = settings.eventJoinLink || process.env.EVENT_JOIN_LINK || 'https://zoxertech.me/buy-bots';
 
-        // 8. Build Native WhatsApp EventMessage Payload
-        const eventMessage = proto.Message.EventMessage.create({
-            isCanceled: false,
-            name: title,
-            description: description,
-            location: {
-                degreesLatitude: 0,
-                degreesLongitude: 0,
-                name: 'Online'
-            },
-            joinLink: joinLink,
-            startTime: String(startTime),
-            endTime: String(endTime),
-            extraGuestsAllowed: true,
-            contextInfo: {
-                mentionedJid: allMembers,
-                externalAdReply: {
-                    title: title,
-                    body: description,
-                    mediaType: 1, // IMAGE
-                    renderLargerThumbnail: true,
-                    thumbnail: imageBuffer,
-                    sourceUrl: joinLink
-                }
-            }
-        });
+        // 8. Generate 32-byte Cryptographic Secret (Required by WhatsApp for Going/Can't Go RSVP)
+        const messageSecret = crypto.randomBytes(32);
 
-        // 9. Generate and Relay Message
-        const botUserJid = sock.user?.id ? jidNormalizedUser(sock.user.id) : undefined;
-        const waMsg = generateWAMessageFromContent(chatId, {
-            eventMessage: eventMessage
-        }, {
-            userJid: botUserJid,
-            quoted: message
-        });
+        // 9. Prepare contextInfo (Mentions + ExternalAdReply banner if image available)
+        const contextInfo = {
+            mentionedJid: allMembers
+        };
 
-        if (typeof sock.relayMessage === 'function') {
-            await sock.relayMessage(chatId, waMsg.message, { messageId: waMsg.key.id });
-        } else {
-            await sock.sendMessage(chatId, { eventMessage: eventMessage }, { quoted: message });
+        if (imageBuffer && imageBuffer.length > 0) {
+            contextInfo.externalAdReply = {
+                title: title,
+                body: description,
+                mediaType: 1, // IMAGE
+                renderLargerThumbnail: true,
+                thumbnail: imageBuffer,
+                sourceUrl: joinLink
+            };
         }
+
+        // 10. Build Payload for Baileys
+        const eventContent = {
+            event: {
+                name: title,
+                description: description,
+                startDate: new Date(startTime * 1000),
+                endDate: new Date(endTime * 1000),
+                location: { name: 'Online' },
+                extraGuestsAllowed: true,
+                messageSecret: messageSecret
+            },
+            contextInfo: contextInfo
+        };
+
+        const botUserJid = sock.user?.id ? jidNormalizedUser(sock.user.id) : undefined;
+
+        // 11. Generate Native WhatsApp Message
+        let fullMsg = null;
+        try {
+            fullMsg = await generateWAMessage(chatId, eventContent, {
+                userJid: botUserJid,
+                quoted: message
+            });
+
+            if (joinLink && fullMsg.message?.eventMessage) {
+                fullMsg.message.eventMessage.joinLink = joinLink;
+            }
+        } catch (genErr) {
+            console.warn('[IMGEVENT] generateWAMessage error, falling back:', genErr.message);
+        }
+
+        // 12. Relay or Send with Meta Creation Tag
+        let sent = false;
+        if (fullMsg?.message && typeof sock.relayMessage === 'function') {
+            try {
+                await sock.relayMessage(chatId, fullMsg.message, {
+                    messageId: fullMsg.key.id,
+                    additionalNodes: [
+                        {
+                            tag: 'meta',
+                            attrs: {
+                                event_type: 'creation'
+                            }
+                        }
+                    ]
+                });
+                sent = true;
+            } catch (relayErr) {
+                console.warn('[IMGEVENT] relayMessage failed, trying sock.sendMessage fallback:', relayErr.message);
+            }
+        }
+
+        if (!sent) {
+            await sock.sendMessage(chatId, eventContent, { quoted: message });
+        }
+
+        // 13. React with Calendar Emoji to confirm success
+        try {
+            if (message?.key) {
+                await sock.sendMessage(chatId, { react: { text: '📅', key: message.key } });
+            }
+        } catch (_) {}
 
     } catch (error) {
         console.error('❌ [IMGEVENT] Error executing event command:', error);

@@ -1,4 +1,6 @@
 const assert = require('assert');
+const crypto = require('crypto');
+const { generateWAMessage, proto } = require('@whiskeysockets/baileys');
 const imgeventCommand = require('../commands/imgevent');
 
 console.log('========================================================');
@@ -40,8 +42,8 @@ async function main() {
         assert.ok(sent[0].content.text.includes('group chats'));
     });
 
-    // SCENARIO 2: Reject when no image is attached or quoted
-    await runTest('Reject execution when no image is attached or replied to', async () => {
+    // SCENARIO 2: Show usage when no arguments and no image
+    await runTest('Show helpful usage guide when command is sent without text and without image', async () => {
         const sent = [];
         const mockSock = {
             sendMessage: async (jid, content, options) => {
@@ -52,38 +54,82 @@ async function main() {
 
         const msg = {
             key: { remoteJid: '120363024829384729@g.us', id: 'gp_msg_1' },
-            message: { conversation: '.imgevent Test | Desc | 1' }
+            message: { conversation: '.imgevent' }
         };
 
-        await imgeventCommand(mockSock, '120363024829384729@g.us', msg);
+        await imgeventCommand(mockSock, '120363024829384729@g.us', msg, '.imgevent');
         assert.strictEqual(sent.length, 1);
-        assert.ok(sent[0].content.text.includes('No image'));
+        assert.ok(sent[0].content.text.includes('ZOXER PROMOTIONAL EVENT'));
         assert.ok(sent[0].content.text.includes('.imgevent Title | Description | HoursFromNow'));
     });
 
-    // SCENARIO 3: Reject when image exists but title is empty
-    await runTest('Reject when title is missing in argument parsing', async () => {
-        const sent = [];
+    // SCENARIO 3: Support plain title without pipes (e.g., .imgevent whatsappbot)
+    await runTest('Support plain title without pipe delimiters', async () => {
+        const relayed = [];
         const mockSock = {
+            user: { id: '923232391033:0@s.whatsapp.net' },
+            groupMetadata: async (jid) => ({
+                id: jid,
+                participants: [{ id: '923232391033@s.whatsapp.net' }]
+            }),
+            relayMessage: async (jid, msg, options) => {
+                relayed.push({ jid, msg, options });
+                return { key: { id: 'relayed_plain' } };
+            },
             sendMessage: async (jid, content, options) => {
-                sent.push({ jid, content, options });
-                return { key: { id: 'sent_003' } };
+                return { key: { id: 'sent_fallback' } };
             }
         };
 
-        // Message replying to an image
         const msg = {
-            key: { remoteJid: '120363024829384729@g.us', id: 'gp_msg_2' },
+            key: { remoteJid: '120363024829384729@g.us', id: 'gp_plain_title' },
+            message: { conversation: '.imgevent whatsappbot' }
+        };
+
+        await imgeventCommand(mockSock, '120363024829384729@g.us', msg, '.imgevent whatsappbot');
+        assert.strictEqual(relayed.length, 1);
+        const eventMsg = relayed[0].msg.eventMessage;
+        assert.strictEqual(eventMsg.name, 'whatsappbot');
+        assert.ok(relayed[0].options.additionalNodes.some(n => n.attrs?.event_type === 'creation'));
+        assert.ok(relayed[0].msg.messageContextInfo?.messageSecret);
+        assert.strictEqual(relayed[0].msg.messageContextInfo.messageSecret.length, 32);
+    });
+
+    // SCENARIO 4: Successful event card creation with image, pipes, and participant tagging
+    await runTest('Build native eventMessage with image banner, Going buttons and event_type creation node', async () => {
+        const relayed = [];
+        const mockSock = {
+            user: { id: '923232391033:0@s.whatsapp.net' },
+            groupMetadata: async (jid) => ({
+                id: jid,
+                participants: [
+                    { id: '923232391033@s.whatsapp.net' },
+                    { id: '111222333@s.whatsapp.net' },
+                    { id: '444555666@s.whatsapp.net' }
+                ]
+            }),
+            relayMessage: async (jid, msg, options) => {
+                relayed.push({ jid, msg, options });
+                return { key: { id: 'relayed_full' } };
+            },
+            sendMessage: async (jid, content, options) => {
+                return { key: { id: 'sent_fallback' } };
+            }
+        };
+
+        // Quoting an image
+        const testImageBuf = Buffer.from('fake_image_bytes_for_testing');
+        const msg = {
+            key: { remoteJid: '120363024829384729@g.us', id: 'gp_msg_reply' },
             message: {
                 extendedTextMessage: {
-                    text: '.imgevent',
+                    text: '.imgevent Grand Sale | 50% discount on bot licenses! | 2',
                     contextInfo: {
-                        stanzaId: 'orig_img_1',
-                        participant: '923232391033@s.whatsapp.net',
+                        stanzaId: 'img_msg_999',
+                        participant: '111222333@s.whatsapp.net',
                         quotedMessage: {
                             imageMessage: {
-                                mimetype: 'image/jpeg',
-                                url: 'https://example.com/test.jpg'
+                                mimetype: 'image/jpeg'
                             }
                         }
                     }
@@ -91,116 +137,85 @@ async function main() {
             }
         };
 
-        await imgeventCommand(mockSock, '120363024829384729@g.us', msg, '.imgevent');
-        assert.strictEqual(sent.length, 1);
-        assert.ok(sent[0].content.text.includes('Title is required') || sent[0].content.text.includes('Failed to download'));
+        // Call command
+        await imgeventCommand(mockSock, '120363024829384729@g.us', msg, msg.message.extendedTextMessage.text);
+
+        assert.strictEqual(relayed.length, 1);
+        const sent = relayed[0];
+        assert.strictEqual(sent.jid, '120363024829384729@g.us');
+        assert.ok(sent.msg.eventMessage, 'Must contain eventMessage');
+        assert.strictEqual(sent.msg.eventMessage.name, 'Grand Sale');
+        assert.strictEqual(sent.msg.eventMessage.description, '50% discount on bot licenses!');
+        assert.strictEqual(sent.msg.eventMessage.isCanceled, false);
+        assert.strictEqual(sent.msg.eventMessage.extraGuestsAllowed, true);
+
+        // Check messageSecret is 32 bytes
+        assert.ok(sent.msg.messageContextInfo?.messageSecret, 'Must contain messageContextInfo.messageSecret');
+        assert.strictEqual(sent.msg.messageContextInfo.messageSecret.length, 32);
+
+        // Check additionalNodes has event_type: creation
+        assert.ok(sent.options?.additionalNodes, 'Must have additionalNodes');
+        const metaNode = sent.options.additionalNodes.find(n => n.tag === 'meta' && n.attrs?.event_type === 'creation');
+        assert.ok(metaNode, 'Must include meta node with event_type: creation');
+
+        // Check contextInfo mentions all group members
+        const mentioned = sent.msg.eventMessage.contextInfo?.mentionedJid || [];
+        assert.strictEqual(mentioned.length, 3);
+        assert.ok(mentioned.includes('923232391033@s.whatsapp.net'));
+        assert.ok(mentioned.includes('111222333@s.whatsapp.net'));
+        assert.ok(mentioned.includes('444555666@s.whatsapp.net'));
     });
 
-    // SCENARIO 4: Successful event card creation and relay with valid image & arguments
-    await runTest('Build native eventMessage payload and relay with all requirements', async () => {
-        const relayed = [];
-        const testImageBuf = Buffer.from('fake_jpeg_image_data_binary_stream');
-
+    // SCENARIO 5: Fallback to sock.sendMessage if relayMessage throws
+    await runTest('Fallback to sock.sendMessage if relayMessage fails', async () => {
+        const sentList = [];
         const mockSock = {
             user: { id: '923232391033:0@s.whatsapp.net' },
-            groupMetadata: async (jid) => {
-                return {
-                    id: jid,
-                    subject: 'VIP Group',
-                    participants: [
-                        { id: '923232391033@s.whatsapp.net', admin: 'admin' },
-                        { id: '111222333@s.whatsapp.net', admin: null },
-                        { id: '444555666@s.whatsapp.net', admin: null }
-                    ]
-                };
-            },
-            updateMediaMessage: async () => {},
-            relayMessage: async (jid, msg, options) => {
-                relayed.push({ jid, msg, options });
-                return { key: { id: 'relayed_001' } };
+            groupMetadata: async () => ({ participants: [] }),
+            relayMessage: async () => {
+                throw new Error('Relay connection dropped');
             },
             sendMessage: async (jid, content, options) => {
-                return { key: { id: 'sent_fallback' } };
+                sentList.push({ jid, content, options });
+                return { key: { id: 'fallback_sent' } };
             }
         };
 
-        // Direct image message with caption
         const msg = {
-            key: { remoteJid: '120363024829384729@g.us', id: 'gp_msg_direct_img' },
-            message: {
-                imageMessage: {
-                    caption: '.imgevent Grand Cyber Sale | 50% discount on all bot modules! | 2.5',
-                    mimetype: 'image/jpeg',
-                    mediaKey: Buffer.from('dummy_key')
-                }
-            }
+            key: { remoteJid: '120363024829384729@g.us', id: 'gp_msg_fallback' },
+            message: { conversation: '.imgevent Fallback Event | Description | 1' }
         };
 
-        // Mock downloadContentFromMessage / downloadMediaMessage by overriding require cache or providing buffer
-        // Let's test with a mock by calling imgeventCommand with a simulated download
-        // Since downloadMediaMessage needs network, let's verify proto structure:
-        const { proto, generateWAMessageFromContent } = require('@whiskeysockets/baileys');
-        const title = 'Grand Cyber Sale';
-        const description = '50% discount on all bot modules!';
-        const hoursFromNow = 2.5;
-        const nowSec = Math.floor(Date.now() / 1000);
-        const startTime = nowSec + Math.round(hoursFromNow * 3600);
-        const endTime = startTime + 7200;
-        const joinLink = 'https://zoxertech.me/buy-bots';
-        const allMembers = ['923232391033@s.whatsapp.net', '111222333@s.whatsapp.net', '444555666@s.whatsapp.net'];
-
-        const eventMessage = proto.Message.EventMessage.create({
-            isCanceled: false,
-            name: title,
-            description: description,
-            location: {
-                degreesLatitude: 0,
-                degreesLongitude: 0,
-                name: 'Online'
-            },
-            joinLink: joinLink,
-            startTime: String(startTime),
-            endTime: String(endTime),
-            extraGuestsAllowed: true,
-            contextInfo: {
-                mentionedJid: allMembers,
-                externalAdReply: {
-                    title: title,
-                    body: description,
-                    mediaType: 1,
-                    renderLargerThumbnail: true,
-                    thumbnail: testImageBuf,
-                    sourceUrl: joinLink
-                }
-            }
-        });
-
-        assert.strictEqual(eventMessage.name, title);
-        assert.strictEqual(eventMessage.description, description);
-        assert.strictEqual(eventMessage.joinLink, joinLink);
-        assert.strictEqual(eventMessage.location.name, 'Online');
-        assert.strictEqual(eventMessage.extraGuestsAllowed, true);
-        assert.strictEqual(eventMessage.isCanceled, false);
-        assert.strictEqual(eventMessage.contextInfo.mentionedJid.length, 3);
-        assert.strictEqual(eventMessage.contextInfo.externalAdReply.title, title);
-        assert.strictEqual(eventMessage.contextInfo.externalAdReply.renderLargerThumbnail, true);
-        assert.strictEqual(eventMessage.contextInfo.externalAdReply.mediaType, 1);
-
-        const waMsg = generateWAMessageFromContent('120363024829384729@g.us', { eventMessage }, { userJid: '923232391033@s.whatsapp.net' });
-        assert.ok(waMsg.message.eventMessage);
-        await mockSock.relayMessage('120363024829384729@g.us', waMsg.message, { messageId: waMsg.key.id });
-        assert.strictEqual(relayed.length, 1);
-        assert.strictEqual(relayed[0].jid, '120363024829384729@g.us');
+        await imgeventCommand(mockSock, '120363024829384729@g.us', msg, msg.message.conversation);
+        assert.ok(sentList.length >= 1);
+        const eventContent = sentList.find(s => s.content.event);
+        assert.ok(eventContent, 'Must call sock.sendMessage with event content');
+        assert.strictEqual(eventContent.content.event.name, 'Fallback Event');
+        assert.ok(eventContent.content.event.messageSecret);
     });
 
-    // SCENARIO 5: Alias .promoevent recognition
-    await runTest('Alias .promoevent parses arguments properly', async () => {
-        const text = '.promoevent Flash Offer | Special perks | 1';
-        const clean = text.replace(/^\.(imgevent|promoevent)\s*/i, '').trim();
-        const parts = clean.split('|').map(p => p.trim());
-        assert.strictEqual(parts[0], 'Flash Offer');
-        assert.strictEqual(parts[1], 'Special perks');
-        assert.strictEqual(parts[2], '1');
+    // SCENARIO 6: Alias .promoevent recognition
+    await runTest('Alias .promoevent works identical to .imgevent', async () => {
+        const relayed = [];
+        const mockSock = {
+            user: { id: '923232391033:0@s.whatsapp.net' },
+            groupMetadata: async () => ({ participants: [] }),
+            relayMessage: async (jid, msg, options) => {
+                relayed.push({ jid, msg, options });
+                return { key: { id: 'relayed_promo' } };
+            },
+            sendMessage: async () => ({ key: { id: 'sent' } })
+        };
+
+        const msg = {
+            key: { remoteJid: '120363024829384729@g.us', id: 'gp_promo' },
+            message: { conversation: '.promoevent Promo Exclusive | Join us live | 3' }
+        };
+
+        await imgeventCommand(mockSock, '120363024829384729@g.us', msg, msg.message.conversation);
+        assert.strictEqual(relayed.length, 1);
+        assert.strictEqual(relayed[0].msg.eventMessage.name, 'Promo Exclusive');
+        assert.strictEqual(relayed[0].msg.eventMessage.description, 'Join us live');
     });
 
     console.log('\n========================================================');
