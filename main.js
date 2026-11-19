@@ -302,7 +302,6 @@ const { anticallCommand, readState: readAnticallState } = require('./commands/an
 const { pmblockerCommand, readState: readPmBlockerState } = require('./commands/pmblocker');
 const settingsCommand = require('./commands/settings');
 const { stealthCommand } = require('./commands/stealth');
-const { singletickCommand } = require('./commands/singletick');
 const { getSessionPhone, isSessionOwner, getBotMode, setBotMode } = require('./lib/session-settings');
 const soraCommand = require('./commands/sora');
 const statusCommand = require('./commands/status');
@@ -1162,11 +1161,6 @@ async function handleMessages(sock, messageUpdate, printLog) {
             }
             case userMessage.startsWith('.stealth'):
                 await stealthCommand(sock, chatId, message, userMessage.split(/\s+/).slice(1));
-                commandExecuted = true;
-                break;
-            case userMessage.startsWith('.singletick'):
-            case userMessage.startsWith('.fakeoffline'):
-                await singletickCommand(sock, chatId, message, userMessage.split(/\s+/).slice(1));
                 commandExecuted = true;
                 break;
             case userMessage.startsWith('.anticall'):

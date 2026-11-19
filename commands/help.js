@@ -133,7 +133,6 @@ const commandCatalog = {
     'antibot': { category: 'Group Management', desc: 'Auto detect and kick rival bots from groups.', usage: '.antibot on / delete / off' },
     'antiforeign': { category: 'Group Management', desc: 'Kick foreign/unauthorized country code numbers.', usage: '.antiforeign on / off / set / block / scan' },
     'antiviewonce': { category: 'Security & Privacy', desc: 'Stealthily intercept View-Once photos/videos to owner DM.', usage: '.antiviewonce on / off' },
-    'singletick': { category: 'Security & Privacy', desc: 'Permanently show single tick (✓) to senders even when online.', usage: '.singletick on / off / status' },
     'afk': { category: 'Utility & Tools', desc: 'Set away-from-keyboard status with auto responder.', usage: '.afk [reason] or .afk off' },
     'unafk': { category: 'Utility & Tools', desc: 'Turn off AFK status manually.', usage: '.unafk or .afk off' },
     'cookies': { category: 'Owner Control', desc: 'Manage YouTube cookies for music/video downloads.', usage: '.cookies / .setcookies' },
