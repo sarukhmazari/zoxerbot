@@ -845,20 +845,35 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 try {
                     const { isAutoHidetagEnabled, isSessionOwner } = require('./lib/session-settings');
                     if (isAutoHidetagEnabled(sock)) {
-                        const isSenderSessionOwner = isSessionOwner(sock, senderId, message) || message.key?.fromMe || senderIsOwnerOrSudo;
-                        if (isSenderSessionOwner && userMessage.trim() !== '\u200E') {
-                            const { getGroupMetadata } = require('./lib/myfunc');
-                            getGroupMetadata(sock, chatId).then(metadata => {
-                                const participants = (metadata?.participants || []).map(p => p.id || p.phoneNumber || p.lid).filter(Boolean);
-                                if (participants.length > 0) {
-                                    sock.sendMessage(chatId, {
-                                        text: '\u200E',
-                                        mentions: participants
-                                    }, { quoted: message }).catch(err => {
-                                        console.error('[AUTOHIDETAG] Error sending silent mention:', err.message);
-                                    });
-                                }
-                            }).catch(() => {});
+                        const isBotSent = Boolean(global.botSentMessageIds && global.botSentMessageIds.has(message.key?.id));
+                        const isSilentMention = rawText.includes('\u200E');
+                        const isSenderSessionOwner = (isSessionOwner(sock, senderId, message) || message.key?.fromMe || senderIsOwnerOrSudo);
+
+                        if (isSenderSessionOwner && !isBotSent && !isSilentMention) {
+                            if (!global.lastAutoHidetagTime) global.lastAutoHidetagTime = new Map();
+                            const lastTime = global.lastAutoHidetagTime.get(chatId) || 0;
+                            const now = Date.now();
+
+                            if (now - lastTime >= 3000) {
+                                global.lastAutoHidetagTime.set(chatId, now);
+                                const { getGroupMetadata } = require('./lib/myfunc');
+                                getGroupMetadata(sock, chatId).then(metadata => {
+                                    const participants = (metadata?.participants || []).map(p => p.id || p.phoneNumber || p.lid).filter(Boolean);
+                                    if (participants.length > 0) {
+                                        sock.sendMessage(chatId, {
+                                            text: '\u200E',
+                                            mentions: participants
+                                        }, { quoted: message }).then(sent => {
+                                            if (sent?.key?.id) {
+                                                if (!global.botSentMessageIds) global.botSentMessageIds = new Set();
+                                                global.botSentMessageIds.add(sent.key.id);
+                                            }
+                                        }).catch(err => {
+                                            console.error('[AUTOHIDETAG] Error sending silent mention:', err.message);
+                                        });
+                                    }
+                                }).catch(() => {});
+                            }
                         }
                     }
                 } catch (e) {}

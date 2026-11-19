@@ -75,6 +75,21 @@ async function handleAntitagCommand(sock, chatId, userMessage, senderId, isSende
 
 async function handleTagDetection(sock, chatId, message, senderId) {
     try {
+        // 1. Never trigger antitag on messages from the bot itself (fromMe)
+        if (message?.key?.fromMe) return;
+
+        // 2. Never trigger antitag on bot-sent messages
+        if (global.botSentMessageIds && global.botSentMessageIds.has(message?.key?.id)) return;
+
+        // 3. Never trigger antitag on session owner or sudo
+        const { isSessionOwner } = require('../lib/session-settings');
+        if (isSessionOwner(sock, senderId, message)) return;
+
+        // 4. Never trigger antitag on group admins
+        const isAdmin = require('../lib/isAdmin');
+        const { isSenderAdmin } = await isAdmin(sock, chatId, senderId);
+        if (isSenderAdmin) return;
+
         const antitagSetting = await getAntitag(chatId, 'on');
         if (!antitagSetting || !antitagSetting.enabled) return;
 
