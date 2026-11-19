@@ -16,6 +16,7 @@ const {
     getAutoStatusConfig,
     getAutoReactConfig,
     getStealthConfig,
+    getSingleTickConfig,
     getAutoJoinLinksConfig,
     getAutoReadConfig,
     getAutoTypingConfig,
@@ -41,6 +42,7 @@ async function settingsCommand(sock, chatId, message) {
         const autoStatus = getAutoStatusConfig(sock);
         const autoReact = getAutoReactConfig(sock);
         const stealth = getStealthConfig(sock);
+        const singleTick = getSingleTickConfig(sock);
         const autojoinlinks = getAutoJoinLinksConfig(sock);
         const autoread = getAutoReadConfig(sock);
         const autotyping = getAutoTypingConfig(sock);
@@ -69,6 +71,7 @@ async function settingsCommand(sock, chatId, message) {
         lines.push(`┃  ◈ *Auto Status:* ${autoStatus.enabled ? 'ON' : 'OFF (Default)'}`);
         lines.push(`┃  ◈ *Auto React:* ${(autoReact.autoreact_dm || autoReact.enabledGroups.length > 0) ? 'ON' : 'OFF (Default)'}`);
         lines.push(`┃  ◈ *Stealth Mode:* ${stealth.enabled ? 'ON' : 'OFF (Default)'}`);
+        lines.push(`┃  ◈ *Single Tick:* ${singleTick.enabled ? 'ON 🎯' : 'OFF (Default)'}`);
         lines.push(`┃  ◈ *Auto Join Links:* ${autojoinlinks.enabled ? 'ON' : 'OFF (Default)'}`);
         lines.push(`┃  ◈ *Autoread:* ${autoread.enabled ? 'ON' : 'OFF'}`);
         lines.push(`┃  ◈ *Autotyping:* ${autotyping.enabled ? 'ON' : 'OFF'}`);
