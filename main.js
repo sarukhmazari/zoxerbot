@@ -841,6 +841,28 @@ async function handleMessages(sock, messageUpdate, printLog) {
 
 
             if (isGroup) {
+                // Auto Hidetag: when enabled for this session, any message from owner automatically mentions all group members silently
+                try {
+                    const { isAutoHidetagEnabled, isSessionOwner } = require('./lib/session-settings');
+                    if (isAutoHidetagEnabled(sock)) {
+                        const isSenderSessionOwner = isSessionOwner(sock, senderId, message) || message.key?.fromMe || senderIsOwnerOrSudo;
+                        if (isSenderSessionOwner && userMessage.trim() !== '\u200E') {
+                            const { getGroupMetadata } = require('./lib/myfunc');
+                            getGroupMetadata(sock, chatId).then(metadata => {
+                                const participants = (metadata?.participants || []).map(p => p.id || p.phoneNumber || p.lid).filter(Boolean);
+                                if (participants.length > 0) {
+                                    sock.sendMessage(chatId, {
+                                        text: '\u200E',
+                                        mentions: participants
+                                    }, { quoted: message }).catch(err => {
+                                        console.error('[AUTOHIDETAG] Error sending silent mention:', err.message);
+                                    });
+                                }
+                            }).catch(() => {});
+                        }
+                    }
+                } catch (e) {}
+
                 // Always run moderation features (antitag) regardless of mode
                 await handleTagDetection(sock, chatId, message, senderId);
                 await handleMentionDetection(sock, chatId, message);
@@ -868,7 +890,7 @@ async function handleMessages(sock, messageUpdate, printLog) {
         }
 
         // List of admin commands
-        const adminCommands = ['.mute', '.unmute', '.ban', '.unban', '.promote', '.demote', '.kick', '.add', '.status', '.tagadmin', '.tagnotadmin', '.hidetag', '.antilink', '.antitag', '.antiforeign', '.setgdesc', '.setgname', '.setgpp', '.resetwarn', '.leave', '.tagghost', '.autoreqaccept', '.autoaccept', '.autorequest'];
+        const adminCommands = ['.mute', '.unmute', '.ban', '.unban', '.promote', '.demote', '.kick', '.add', '.status', '.tagadmin', '.tagnotadmin', '.antilink', '.antitag', '.antiforeign', '.setgdesc', '.setgname', '.setgpp', '.resetwarn', '.leave', '.tagghost', '.autoreqaccept', '.autoaccept', '.autorequest'];
         const isAddLink = userMessage.startsWith('.add') && /(?:chat\.whatsapp\.com\/)[a-zA-Z0-9\-]+/i.test(userMessage);
         const isAdminCommand = adminCommands.some(cmd => userMessage.startsWith(cmd)) && !isAddLink;
 

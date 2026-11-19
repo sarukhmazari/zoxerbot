@@ -107,7 +107,7 @@ const commandCatalog = {
     'promoevent': { category: 'Group Management', desc: 'Alias for .imgevent.', usage: '.promoevent Title | Description | Hours' },
     'tagadmin': { category: 'Group Management', desc: 'Mention all group administrators.', usage: '.tagadmin [message]' },
     'tagnotadmin': { category: 'Group Management', desc: 'Mention all non-admin group members.', usage: '.tagnotadmin [message]' },
-    'hidetag': { category: 'Group Management', desc: 'Send an invisible broadcast mention to all members.', usage: '.hidetag [message]' },
+    'hidetag': { category: 'Group Management', desc: 'Silently tag all group members, or toggle auto-hidetag.', usage: '.hidetag [message] or .hidetag on/off' },
     'tagghost': { category: 'Group Management', desc: 'Detect inactive members who have not sent messages.', usage: '.tagghost' },
     'warn': { category: 'Group Management', desc: 'Issue a warning strike to user (kicks at 3 warnings).', usage: '.warn @user' },
     'warnings': { category: 'Group Management', desc: 'Check active warning count for user.', usage: '.warnings @user' },
