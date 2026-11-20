@@ -16,3 +16,8 @@
 3. **CONFIRMATION BEFORE DEPLOYMENT:**
    - Always report completed changes to the user first.
    - Stop and wait for the user to review and confirm before running any deployment or push commands.
+
+## 🗣️ Language & Communication Rules
+1. **ALWAYS RESPOND IN ROMAN URDU:**
+   - Always provide responses, explanations, and guides in clean Roman Urdu.
+

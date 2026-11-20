@@ -175,7 +175,7 @@ async function imgeventCommand(sock, chatId, message, rawText) {
         // If no title text and no image provided, show usage help
         if (!paramStr && !imageMessage) {
             return await sock.sendMessage(chatId, {
-                text: `╭─〔 📅 *ZOXER PROMOTIONAL EVENT* 〕\n` +
+                text: `╭─〔 📅 *EVENT ANNOUNCEMENT* 〕\n` +
                       `│\n` +
                       `│ ❌ *No event details provided!*\n` +
                       `│\n` +
@@ -190,7 +190,7 @@ async function imgeventCommand(sock, chatId, message, rawText) {
                       `│   \`.imgevent Title\`\n` +
                       `│\n` +
                       `│ 💡 *Example:*\n` +
-                      `│ \`.imgevent Mega Bot Launch | Tap Going to join! | 2\`\n` +
+                      `│ \`.imgevent Team Meeting | Important project discussion | 2\`\n` +
                       `│\n` +
                       `╰─────────────────────────`
             }, { quoted: message });
@@ -200,6 +200,7 @@ async function imgeventCommand(sock, chatId, message, rawText) {
         let title = '';
         let description = 'Tap Going to get notified and join!';
         let hoursFromNow = 1;
+        let customLink = '';
 
         if (paramStr.includes('|')) {
             const parts = paramStr.split('|').map(p => p.trim());
@@ -211,10 +212,15 @@ async function imgeventCommand(sock, chatId, message, rawText) {
                 } else if (parts[1]) {
                     description = parts[1];
                 }
-            } else if (parts.length >= 3) {
+            } else if (parts.length === 3) {
                 if (parts[1]) description = parts[1];
                 const hoursArg = parseFloat(parts[2]);
                 if (!isNaN(hoursArg) && hoursArg > 0) hoursFromNow = hoursArg;
+            } else if (parts.length >= 4) {
+                if (parts[1]) description = parts[1];
+                const hoursArg = parseFloat(parts[2]);
+                if (!isNaN(hoursArg) && hoursArg > 0) hoursFromNow = hoursArg;
+                if (parts[3]) customLink = parts[3];
             }
         } else if (paramStr) {
             title = paramStr;
@@ -225,7 +231,7 @@ async function imgeventCommand(sock, chatId, message, rawText) {
 
         if (!title) {
             return await sock.sendMessage(chatId, {
-                text: `╭─〔 📅 *ZOXER PROMOTIONAL EVENT* 〕\n` +
+                text: `╭─〔 📅 *EVENT ANNOUNCEMENT* 〕\n` +
                       `│\n` +
                       `│ ❌ *Event Title is required!*\n` +
                       `│\n` +
@@ -233,7 +239,7 @@ async function imgeventCommand(sock, chatId, message, rawText) {
                       `│ \`.imgevent Title | Description | HoursFromNow\`\n` +
                       `│\n` +
                       `│ 💡 *Example:*\n` +
-                      `│ \`.imgevent Special Community Meetup | Join us for bot updates! | 1\`\n` +
+                      `│ \`.imgevent Team Meeting | Important project discussion | 2\`\n` +
                       `│\n` +
                       `╰─────────────────────────`
             }, { quoted: message });
@@ -268,21 +274,23 @@ async function imgeventCommand(sock, chatId, message, rawText) {
             console.warn('[IMGEVENT] Could not fetch participants:', metaErr.message);
         }
 
-        // 7. Configurable Join Link
-        const joinLink = settings.eventJoinLink || process.env.EVENT_JOIN_LINK || 'https://zoxertech.me/buy-bots';
-
-        // 8. If image is available, send promotional image banner first
+        // 7. If image is available, send image banner first (strictly user-provided data)
         if (imageBuffer && imageBuffer.length > 0) {
             try {
+                const hoursText = hoursFromNow === 1 ? '1 hour' : `${hoursFromNow} hours`;
+                let bannerCaption = `╭─〔 📅 *EVENT ANNOUNCEMENT* 〕\n` +
+                                    `│ 🏷️ *Event:* *${title}*\n` +
+                                    `│ 📝 *Details:* ${description}\n` +
+                                    `│ 🕒 *Time:* Starts in ${hoursText} (${hoursText} baad)\n`;
+                if (customLink) {
+                    bannerCaption += `│ 🔗 *Link:* ${customLink}\n`;
+                }
+                bannerCaption += `╰─────────────────────────\n` +
+                                 `👉 *Tap "Going" on the event card below to RSVP!*`;
+
                 await sock.sendMessage(chatId, {
                     image: imageBuffer,
-                    caption: `╭─〔 📅 *ZOXER PROMOTIONAL EVENT* 〕\n` +
-                             `│ 🏷️ *Event:* *${title}*\n` +
-                             `│ 📝 *Details:* ${description}\n` +
-                             `│ 🕒 *Time:* Starts in ${hoursFromNow} hr(s)\n` +
-                             `│ 🔗 *Join Link:* ${joinLink}\n` +
-                             `╰─────────────────────────\n` +
-                             `👉 *Tap "Going" on the event card below to RSVP!*`,
+                    caption: bannerCaption,
                     mentions: allMembers
                 }, { quoted: message });
             } catch (imgErr) {

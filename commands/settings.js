@@ -14,6 +14,7 @@ const {
     isSessionOwner,
     getBotMode,
     getAutoStatusConfig,
+    getAutoGroupStatusConfig,
     getAutoReactConfig,
     getStealthConfig,
     getAutoHidetagConfig,
@@ -40,6 +41,7 @@ async function settingsCommand(sock, chatId, message) {
 
         const mode = getBotMode(sock);
         const autoStatus = getAutoStatusConfig(sock);
+        const autoGroupStatus = getAutoGroupStatusConfig(sock);
         const autoReact = getAutoReactConfig(sock);
         const stealth = getStealthConfig(sock);
         const autohidetag = getAutoHidetagConfig(sock);
@@ -69,6 +71,8 @@ async function settingsCommand(sock, chatId, message) {
         lines.push(`┣─〔 ◈ 𝗦𝗘𝗦𝗦𝗜𝗢𝗡: ${sessionPhone} 〕`);
         lines.push(`┃  ◈ *Mode:* ${mode.isPublic ? 'Public' : 'Private (Default)'}`);
         lines.push(`┃  ◈ *Auto Status:* ${autoStatus.enabled ? 'ON' : 'OFF (Default)'}`);
+        lines.push(`┃  ◈ *Group Status Auto-View:* ${autoGroupStatus.enabled ? 'ON' : 'OFF'}`);
+        lines.push(`┃  ◈ *Group Status Archive:* ${autoGroupStatus.archive ? 'ON' : 'OFF'}`);
         lines.push(`┃  ◈ *Auto React:* ${(autoReact.autoreact_dm || autoReact.enabledGroups.length > 0) ? 'ON' : 'OFF (Default)'}`);
         lines.push(`┃  ◈ *Stealth Mode:* ${stealth.enabled ? 'ON' : 'OFF (Default)'}`);
         lines.push(`┃  ◈ *Auto Hidetag:* ${autohidetag.enabled ? 'ON 🎯' : 'OFF (Default)'}`);

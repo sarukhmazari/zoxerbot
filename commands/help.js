@@ -148,6 +148,8 @@ const commandCatalog = {
     'clearsession': { category: 'Owner Control', desc: 'Clean orphan pre-keys and session garbage.', usage: '.clearsession' },
     'cleartmp': { category: 'Owner Control', desc: 'Flush temporary cache directory.', usage: '.cleartmp' },
     'autostatus': { category: 'Owner Control', desc: 'Toggle auto reading contact statuses.', usage: '.autostatus on / off' },
+    'autogroupstatus': { category: 'Owner Control', desc: 'Auto-view and archive group statuses.', usage: '.autogroupstatus on / off / archive on' },
+    'autostatusview': { category: 'Owner Control', desc: 'Alias for .autogroupstatus.', usage: '.autostatusview on / off' },
     'autoreact': { category: 'Owner Control', desc: 'Toggle auto emoji reaction on messages.', usage: '.autoreact on / off' },
     'autotyping': { category: 'Owner Control', desc: 'Toggle auto typing indicator.', usage: '.autotyping on / off' },
     'autoread': { category: 'Owner Control', desc: 'Toggle auto blue tick receipts.', usage: '.autoread on / off' },
@@ -201,190 +203,242 @@ async function helpCommand(sock, chatId, message, customChannelLink) {
         const mode = isPublic ? '𝗣𝗨𝗕𝗟𝗜𝗖' : '𝗣𝗥𝗜𝗩𝗔𝗧𝗘';
 
         // Construct requested custom stylized menu
-        let helpMessage = `╭─〔 *𝗭𝗢𝗫𝗘𝗥 𝗕𝗢𝗧* 〕\n` +
-            `│\n` +
-            `│  ◈ *𝗢𝗪𝗡𝗘𝗥*\n` +
-            `│  ◆ *𝗭𝗢𝗫𝗘𝗥 𝗧𝗘𝗔𝗠*\n` +
-            `│  ◈ *𝗠𝗢𝗗𝗘*\n` +
-            `│  ◆ *${mode}*\n` +
-            `│  ◈ *𝗣𝗥𝗘𝗙𝗜𝗫*\n` +
-            `│  ◆ *.*\n` +
-            `╰──────────────\n\n` +
-            `╭─〔 ◈ 𝗖𝗢𝗥𝗘 〕\n` +
-            `│  *.ping*\n` +
-            `│  *.alive*\n` +
-            `│  *.owner*\n` +
-            `│  *.repo*\n` +
-            `│  *.settings*\n` +
-            `│  *.status*\n` +
-            `│  *.jid*\n` +
-            `│  *.topmembers*\n` +
-            `│  *.time <city>*\n` +
-            `╰──────────────\n\n` +
-            `╭─〔 ▣ 𝗠𝗘𝗗𝗜𝗔 〕\n` +
-            `│  *.img2pdf <title>* 〔*.topdf*, *.pdf*〕\n` +
-            `│  *.sticker* 〔*.s*〕\n` +
-            `│  *.emojimix <e1>+<e2>* 〔*.emix*〕\n` +
-            `│  *.crop*\n` +
-            `│  *.take <pack> | <author>* 〔*.steal*〕\n` +
-            `│  *.simage*\n` +
-            `│  *.toaudio* 〔*.tomp3*〕\n` +
-            `│  *.reelsaudio <url/reply>* 〔*.extractaudio*, *.reelsmp3*〕\n` +
-            `│  *.tovideo* 〔*.mp4*〕\n` +
-            `│  *.drama <name/ep>*\n` +
-            `│  *.toptt* 〔*.vn*〕\n` +
-            `│  *.robot* 〔reply to audio〕\n` +
-            `│  *.qr <text/url>* 〔*.qrcode*〕\n` +
-            `│  *.scanqr* 〔*.readqr*〕\n` +
-            `│  *.blur*\n` +
-            `│  *.remini* 〔*.enhance*, *.upscale*〕\n` +
-            `│  *.removebg* 〔*.rmbg*, *.nobg*〕\n` +
-            `│  *.invert*\n` +
-            `│  *.rotate <deg>*\n` +
-            `│  *.wasted* 〔*.waste*〕\n` +
-            `│  *.tts <lang> <text>*\n` +
-            `│  *.qc <text>*\n` +
-            `╰──────────────\n\n` +
-            `╭─〔 ✧ 𝗧𝗘𝗫𝗧 𝗧𝗢𝗢𝗟𝗦 〕\n` +
-            `│  *.react <emoji>*\n` +
-            `│  *.fancy <text>* 〔*.styletext*〕\n` +
-            `│  *.readmore <header> | <hidden>* 〔*.spoiler*〕\n` +
-            `│  *.morse <text>*\n` +
-            `│  *.count <text>* 〔*.wordcount*〕\n` +
-            `│  *.reverse <text>*\n` +
-            `│  *.calc <expression>* 〔*.math*〕\n` +
-            `│  *.poll <question|opt1|opt2>*\n` +
-            `│  *.vv*\n` +
-            `│  *.delete* 〔*.del*〕\n` +
-            `│  *.clear*\n` +
-            `╰──────────────\n\n` +
-            `╭─〔 ◎ 𝗦𝗘𝗔𝗥𝗖𝗛 & 𝗜𝗡𝗙𝗢 〕\n` +
-            `│  *.wiki <query>* 〔*.wikipedia*〕\n` +
-            `│  *.crypto <coin>* 〔*.coin*〕\n` +
-            `│  *.dict <word>* 〔*.define*〕\n` +
-            `│  *.weather <city>*\n` +
-            `│  *.news*\n` +
-            `│  *.pinterest <query>* 〔*.pin*〕\n` +
-            `│  *.ss <url>* 〔*.ssweb*〕\n` +
-            `│  *.tourl* 〔*.url*〕\n` +
-            `│  *.facebook <url>* 〔*.fb*〕\n` +
-            `│  *.instagram <url>* 〔*.ig*, *.insta*〕\n` +
-            `│  *.tiktok <url>* 〔*.tt*〕\n` +
-            `│  *.apk <app name>* 〔*.app*〕\n` +
-            `╰──────────────\n\n` +
-            `╭─〔 ♟ 𝗚𝗔𝗠𝗘𝗦 & 𝗙𝗨𝗡 〕\n` +
-            `│  *.tictactoe @user* 〔*.ttt*〕\n` +
-            `│  *.hangman*\n` +
-            `│  *.trivia*\n` +
-            `│  *.roll <sides>* 〔*.dice*〕\n` +
-            `│  *.flipcoin* 〔*.coinflip*〕\n` +
-            `│  *.slots* 〔*.casino*〕\n` +
-            `│  *.riddle*\n` +
-            `│  *.pick <opt1, opt2>* 〔*.choose*〕\n` +
-            `│  *.truth*\n` +
-            `│  *.dare*\n` +
-            `│  *.8ball <question>*\n` +
-            `│  *.meme*\n` +
-            `│  *.joke*\n` +
-            `│  *.quote*\n` +
-            `│  *.compliment*\n` +
-            `│  *.insult*\n` +
-            `│  *.ship @user*\n` +
-            `│  *.simp*\n` +
-            `│  *.flirt*\n` +
-            `│  *.shayari* 〔*.shayri*〕\n` +
-            `│  *.waifu*\n` +
-            `│  *.neko*\n` +
-            `│  *.maid*\n` +
-            `│  *.uniform*\n` +
-            `│  *.husbando*\n` +
-            `│  *.kitsune*\n` +
-            `│  *.shinobu*\n` +
-            `│  *.megumin*\n` +
-            `│  *.animequote*\n` +
-            `╰──────────────\n\n` +
-            `╭─〔 ⌘ 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 〕\n` +
-            `│  *.base64 <text>*\n` +
-            `│  *.binary <text>*\n` +
-            `│  *.hash <text>*\n` +
-            `╰──────────────\n\n`;
+        let helpMessage = `╭━━━〔 👑 𝗭𝗢𝗫𝗘𝗥 𝗕𝗢𝗧 〕━━━╮\n` +
+            `┃\n` +
+            `┃  ◈ 𝗢𝗪𝗡𝗘𝗥 : 𝗭𝗢𝗫𝗘𝗥 \n` +
+            `┃  ◈ 𝗠𝗢𝗗𝗘 : ${mode}\n` +
+            `┃  ◈ 𝗣𝗥𝗘𝗙𝗜𝗫 : .\n` +
+            `┃\n` +
+            `╰━━━━━━━━━━━━━━━━━━╯\n\n` +
+            `╭━━〔 ✦ 𝗖𝗢𝗥𝗘 〕━━╮\n` +
+            `┃  ───◈ .𝗣𝗜𝗡𝗚\n` +
+            `┃  ───◈ .𝗔𝗟𝗜𝗩𝗘\n` +
+            `┃  ───◈ .𝗢𝗪𝗡𝗘𝗥\n` +
+            `┃  ───◈ .𝗥𝗘𝗣𝗢\n` +
+            `┃  ───◈ .𝗦𝗘𝗧𝗧𝗜𝗡𝗚𝗦\n` +
+            `┃  ───◈ .𝗦𝗧𝗔𝗧𝗨𝗦\n` +
+            `┃  ───◈ .𝗝𝗜𝗗\n` +
+            `┃  ───◈ .𝗧𝗢𝗣𝗠𝗘𝗠𝗕𝗘𝗥𝗦\n` +
+            `┃  ───◈ .𝗧𝗜𝗠𝗘 <𝗖𝗜𝗧𝗬>\n` +
+            `╰━━━━━━━━━━━━━━╯\n\n` +
+            `╭━━〔 ✦ 𝗠𝗘𝗗𝗜𝗔 〕━━╮\n` +
+            `┃  ───◈ .𝗜𝗠𝗚𝟮𝗣𝗗𝗙 <𝗧𝗜𝗧𝗟𝗘>\n` +
+            `┃  ───◈ .𝗧𝗢𝗣𝗗𝗙\n` +
+            `┃  ───◈ .𝗣𝗗𝗙\n` +
+            `┃  ───◈ .𝗦𝗧𝗜𝗖𝗞𝗘𝗥\n` +
+            `┃  ───◈ .𝗦\n` +
+            `┃  ───◈ .𝗘𝗠𝗢𝗝𝗜𝗠𝗜𝗫 <𝗘𝟭>+<𝗘𝟮>\n` +
+            `┃  ───◈ .𝗘𝗠𝗜𝗫\n` +
+            `┃  ───◈ .𝗖𝗥𝗢𝗣\n` +
+            `┃  ───◈ .𝗧𝗔𝗞𝗘 <𝗣𝗔𝗖𝗞> | <𝗔𝗨𝗧𝗛𝗢𝗥>\n` +
+            `┃  ───◈ .𝗦𝗧𝗘𝗔𝗟\n` +
+            `┃  ───◈ .𝗦𝗜𝗠𝗔𝗚𝗘\n` +
+            `┃  ───◈ .𝗧𝗢𝗔𝗨𝗗𝗜𝗢\n` +
+            `┃  ───◈ .𝗧𝗢𝗠𝗣𝟯\n` +
+            `┃  ───◈ .𝗥𝗘𝗘𝗟𝗦𝗔𝗨𝗗𝗜𝗢 <𝗨𝗥𝗟/𝗥𝗘𝗣𝗟𝗬>\n` +
+            `┃  ───◈ .𝗘𝗫𝗧𝗥𝗔𝗖𝗧𝗔𝗨𝗗𝗜𝗢\n` +
+            `┃  ───◈ .𝗥𝗘𝗘𝗟𝗦𝗠𝗣𝟯\n` +
+            `┃  ───◈ .𝗧𝗢𝗩𝗜𝗗𝗘𝗢\n` +
+            `┃  ───◈ .𝗠𝗣𝟰\n` +
+            `┃  ───◈ .𝗗𝗥𝗔𝗠𝗔 <𝗡𝗔𝗠𝗘/𝗘𝗣>\n` +
+            `┃  ───◈ .𝗧𝗢𝗣𝗧𝗧\n` +
+            `┃  ───◈ .𝗩𝗡\n` +
+            `┃  ───◈ .𝗥𝗢𝗕𝗢𝗧\n` +
+            `┃  ───◈ .𝗤𝗥 <𝗧𝗘𝗫𝗧/𝗨𝗥𝗟>\n` +
+            `┃  ───◈ .𝗤𝗥𝗖𝗢𝗗𝗘\n` +
+            `┃  ───◈ .𝗦𝗖𝗔𝗡𝗤𝗥\n` +
+            `┃  ───◈ .𝗥𝗘𝗔𝗗𝗤𝗥\n` +
+            `┃  ───◈ .𝗕𝗟𝗨𝗥\n` +
+            `┃  ───◈ .𝗥𝗘𝗠𝗜𝗡𝗜\n` +
+            `┃  ───◈ .𝗘𝗡𝗛𝗔𝗡𝗖𝗘\n` +
+            `┃  ───◈ .𝗨𝗣𝗦𝗖𝗔𝗟𝗘\n` +
+            `┃  ───◈ .𝗥𝗘𝗠𝗢𝗩𝗘𝗕𝗚\n` +
+            `┃  ───◈ .𝗥𝗠𝗕𝗚\n` +
+            `┃  ───◈ .𝗡𝗢𝗕𝗚\n` +
+            `┃  ───◈ .𝗜𝗡𝗩𝗘𝗥𝗧\n` +
+            `┃  ───◈ .𝗥𝗢𝗧𝗔𝗧𝗘 <𝗗𝗘𝗚>\n` +
+            `┃  ───◈ .𝗪𝗔𝗦𝗧𝗘𝗗\n` +
+            `┃  ───◈ .𝗪𝗔𝗦𝗧𝗘\n` +
+            `┃  ───◈ .𝗧𝗧𝗦 <𝗟𝗔𝗡𝗚> <𝗧𝗘𝗫𝗧>\n` +
+            `┃  ───◈ .𝗤𝗖 <𝗧𝗘𝗫𝗧>\n` +
+            `╰━━━━━━━━━━━━━━╯\n\n` +
+            `╭━━〔 ✦ 𝗧𝗘𝗫𝗧 𝗧𝗢𝗢𝗟𝗦 〕━━╮\n` +
+            `┃  ───◈ .𝗥𝗘𝗔𝗖𝗧 <𝗘𝗠𝗢𝗝𝗜>\n` +
+            `┃  ───◈ .𝗙𝗔𝗡𝗖𝗬 <𝗧𝗘𝗫𝗧>\n` +
+            `┃  ───◈ .𝗦𝗧𝗬𝗟𝗘𝗧𝗘𝗫𝗧\n` +
+            `┃  ───◈ .𝗥𝗘𝗔𝗗𝗠𝗢𝗥𝗘 <𝗛𝗘𝗔𝗗𝗘𝗥> | <𝗛𝗜𝗗𝗗𝗘𝗡>\n` +
+            `┃  ───◈ .𝗦𝗣𝗢𝗜𝗟𝗘𝗥\n` +
+            `┃  ───◈ .𝗠𝗢𝗥𝗦𝗘 <𝗧𝗘𝗫𝗧>\n` +
+            `┃  ───◈ .𝗖𝗢𝗨𝗡𝗧 <𝗧𝗘𝗫𝗧>\n` +
+            `┃  ───◈ .𝗪𝗢𝗥𝗗𝗖𝗢𝗨𝗡𝗧\n` +
+            `┃  ───◈ .𝗥𝗘𝗩𝗘𝗥𝗦𝗘 <𝗧𝗘𝗫𝗧>\n` +
+            `┃  ───◈ .𝗖𝗔𝗟𝗖 <𝗘𝗫𝗣𝗥𝗘𝗦𝗦𝗜𝗢𝗡>\n` +
+            `┃  ───◈ .𝗠𝗔𝗧𝗛\n` +
+            `┃  ───◈ .𝗣𝗢𝗟𝗟 <𝗤𝗨𝗘𝗦𝗧𝗜𝗢𝗡|𝗢𝗣𝗧𝟭|𝗢𝗣𝗧𝟮>\n` +
+            `┃  ───◈ .𝗩𝗩\n` +
+            `┃  ───◈ .𝗗𝗘𝗟𝗘𝗧𝗘\n` +
+            `┃  ───◈ .𝗗𝗘𝗟\n` +
+            `┃  ───◈ .𝗖𝗟𝗘𝗔𝗥\n` +
+            `╰━━━━━━━━━━━━━━╯\n\n` +
+            `╭━━〔 ✦ 𝗦𝗘𝗔𝗥𝗖𝗛 & 𝗜𝗡𝗙𝗢 〕━━╮\n` +
+            `┃  ───◈ .𝗪𝗜𝗞𝗜 <𝗤𝗨𝗘𝗥𝗬>\n` +
+            `┃  ───◈ .𝗪𝗜𝗞𝗜𝗣𝗘𝗗𝗜𝗔\n` +
+            `┃  ───◈ .𝗖𝗥𝗬𝗣𝗧𝗢 <𝗖𝗢𝗜𝗡>\n` +
+            `┃  ───◈ .𝗖𝗢𝗜𝗡\n` +
+            `┃  ───◈ .𝗗𝗜𝗖𝗧 <𝗪𝗢𝗥𝗗>\n` +
+            `┃  ───◈ .𝗗𝗘𝗙𝗜𝗡𝗘\n` +
+            `┃  ───◈ .𝗪𝗘𝗔𝗧𝗛𝗘𝗥 <𝗖𝗜𝗧𝗬>\n` +
+            `┃  ───◈ .𝗡𝗘𝗪𝗦\n` +
+            `┃  ───◈ .𝗣𝗜𝗡𝗧𝗘𝗥𝗘𝗦𝗧 <𝗤𝗨𝗘𝗥𝗬>\n` +
+            `┃  ───◈ .𝗣𝗜𝗡\n` +
+            `┃  ───◈ .𝗦𝗦 <𝗨𝗥𝗟>\n` +
+            `┃  ───◈ .𝗦𝗦𝗪𝗘𝗕\n` +
+            `┃  ───◈ .𝗧𝗢𝗨𝗥𝗟\n` +
+            `┃  ───◈ .𝗨𝗥𝗟\n` +
+            `┃  ───◈ .𝗙𝗔𝗖𝗘𝗕𝗢𝗢𝗞 <𝗨𝗥𝗟>\n` +
+            `┃  ───◈ .𝗙𝗕\n` +
+            `┃  ───◈ .𝗜𝗡𝗦𝗧𝗔𝗚𝗥𝗔𝗠 <𝗨𝗥𝗟>\n` +
+            `┃  ───◈ .𝗜𝗚\n` +
+            `┃  ───◈ .𝗜𝗡𝗦𝗧𝗔\n` +
+            `┃  ───◈ .𝗧𝗜𝗞𝗧𝗢𝗞 <𝗨𝗥𝗟>\n` +
+            `┃  ───◈ .𝗧𝗧\n` +
+            `┃  ───◈ .𝗔𝗣𝗞 <𝗔𝗣𝗣 𝗡𝗔𝗠𝗘>\n` +
+            `┃  ───◈ .𝗔𝗣𝗣\n` +
+            `╰━━━━━━━━━━━━━━╯\n\n` +
+            `╭━━〔 ✦ 𝗚𝗔𝗠𝗘𝗦 & 𝗙𝗨𝗡 〕━━╮\n` +
+            `┃  ───◈ .𝗧𝗜𝗖𝗧𝗔𝗖𝗧𝗢𝗘 @𝗨𝗦𝗘𝗥\n` +
+            `┃  ───◈ .𝗧𝗧𝗧\n` +
+            `┃  ───◈ .𝗛𝗔𝗡𝗚𝗠𝗔𝗡\n` +
+            `┃  ───◈ .𝗧𝗥𝗜𝗩𝗜𝗔\n` +
+            `┃  ───◈ .𝗥𝗢𝗟𝗟 <𝗦𝗜𝗗𝗘𝗦>\n` +
+            `┃  ───◈ .𝗗𝗜𝗖𝗘\n` +
+            `┃  ───◈ .𝗙𝗟𝗜𝗣𝗖𝗢𝗜𝗡\n` +
+            `┃  ───◈ .𝗖𝗢𝗜𝗡𝗙𝗟𝗜𝗣\n` +
+            `┃  ───◈ .𝗦𝗟𝗢𝗧𝗦\n` +
+            `┃  ───◈ .𝗖𝗔𝗦𝗜𝗡𝗢\n` +
+            `┃  ───◈ .𝗥𝗜𝗗𝗗𝗟𝗘\n` +
+            `┃  ───◈ .𝗣𝗜𝗖𝗞 <𝗢𝗣𝗧𝟭, 𝗢𝗣𝗧𝟮>\n` +
+            `┃  ───◈ .𝗖𝗛𝗢𝗢𝗦𝗘\n` +
+            `┃  ───◈ .𝗧𝗥𝗨𝗧𝗛\n` +
+            `┃  ───◈ .𝗗𝗔𝗥𝗘\n` +
+            `┃  ───◈ .𝟴𝗕𝗔𝗟𝗟 <𝗤𝗨𝗘𝗦𝗧𝗜𝗢𝗡>\n` +
+            `┃  ───◈ .𝗠𝗘𝗠𝗘\n` +
+            `┃  ───◈ .𝗝𝗢𝗞𝗘\n` +
+            `┃  ───◈ .𝗤𝗨𝗢𝗧𝗘\n` +
+            `┃  ───◈ .𝗖𝗢𝗠𝗣𝗟𝗜𝗠𝗘𝗡𝗧\n` +
+            `┃  ───◈ .𝗜𝗡𝗦𝗨𝗟𝗧\n` +
+            `┃  ───◈ .𝗦𝗛𝗜𝗣 @𝗨𝗦𝗘𝗥\n` +
+            `┃  ───◈ .𝗦𝗜𝗠𝗣\n` +
+            `┃  ───◈ .𝗙𝗟𝗜𝗥𝗧\n` +
+            `┃  ───◈ .𝗦𝗛𝗔𝗬𝗔𝗥𝗜\n` +
+            `┃  ───◈ .𝗦𝗛𝗔𝗬𝗥𝗜\n` +
+            `┃  ───◈ .𝗪𝗔𝗜𝗙𝗨\n` +
+            `┃  ───◈ .𝗡𝗘𝗞𝗢\n` +
+            `┃  ───◈ .𝗠𝗔𝗜𝗗\n` +
+            `┃  ───◈ .𝗨𝗡𝗜𝗙𝗢𝗥𝗠\n` +
+            `┃  ───◈ .𝗛𝗨𝗦𝗕𝗔𝗡𝗗𝗢\n` +
+            `┃  ───◈ .𝗞𝗜𝗧𝗦𝗨𝗡𝗘\n` +
+            `┃  ───◈ .𝗦𝗛𝗜𝗡𝗢𝗕𝗨\n` +
+            `┃  ───◈ .𝗠𝗘𝗚𝗨𝗠𝗜𝗡\n` +
+            `┃  ───◈ .𝗔𝗡𝗜𝗠𝗘𝗤𝗨𝗢𝗧𝗘\n` +
+            `╰━━━━━━━━━━━━━━╯\n\n` +
+            `╭━━〔 ✦ 𝗗𝗘𝗩𝗘𝗟𝗢𝗣𝗘𝗥 〕━━╮\n` +
+            `┃  ───◈ .𝗕𝗔𝗦𝗘𝟲𝟰 <𝗧𝗘𝗫𝗧>\n` +
+            `┃  ───◈ .𝗕𝗜𝗡𝗔𝗥𝗬 <𝗧𝗘𝗫𝗧>\n` +
+            `┃  ───◈ .𝗛𝗔𝗦𝗛 <𝗧𝗘𝗫𝗧>\n` +
+            `╰━━━━━━━━━━━━━━╯\n\n`;
 
         // Section: Group Management (Shown to Group Admins or Owner)
         if (isSenderAdmin || isOwner) {
-            helpMessage += `╭─〔 ♧ 𝗚𝗥𝗢𝗨𝗣 𝗠𝗔𝗡𝗔𝗚𝗘𝗠𝗘𝗡𝗧 〕\n` +
-                `│  *Visible to Group Admins & Owner*\n` +
-                `│\n` +
-                `│  *.kick @user*\n` +
-                `│  *.add <number>*\n` +
-                `│  *.promote @user*\n` +
-                `│  *.demote @user*\n` +
-                `│  *.mute <mins>*\n` +
-                `│  *.unmute*\n` +
-                `│  *.link* 〔*.glink*〕\n` +
-                `│  *.resetlink* 〔*.revoke*〕\n` +
-                `│  *.tagall <text>*\n` +
-                `│  *.tagadmin <text>*\n` +
-                `│  *.tagnotadmin <text>*\n` +
-                `│  *.hidetag <text>*\n` +
-                `│  *.tagghost* 〔*.ghosts*〕\n` +
-                `│  *.warn @user*\n` +
-                `│  *.warnings @user*\n` +
-                `│  *.resetwarn @user* 〔*.unwarn*〕\n` +
-                `│  *.leave* 〔*.leavegc*〕\n` +
-                `│  *.groupinfo* 〔*.infogp*〕\n` +
-                `│  *.staff* 〔*.admins*〕\n` +
-                `│  *.adminlock*\n` +
-                `│  *.setgname <name>*\n` +
-                `│  *.setgdesc <desc>*\n` +
-                `│  *.setgpp*\n` +
-                `│  *.welcome on/off*\n` +
-                `│  *.goodbye on/off*\n` +
-                `│  *.autoreqaccept on/off/now*\n` +
-                `│  *.antilink on/off*\n` +
-                `│  *.antitag on/off*\n` +
-                `│  *.antibadword on/off*\n` +
-                `│  *.antiforeign on/off*\n` +
-                `│  *.antispam on/off*\n` +
-                `╰──────────────\n\n`;
+            helpMessage += `╭━━〔 ✦ 𝗚𝗥𝗢𝗨𝗣 𝗠𝗔𝗡𝗔𝗚𝗘𝗠𝗘𝗡𝗧 〕━━╮\n` +
+                `┃  *Visible to Group Admins & Owner*\n` +
+                `┃\n` +
+                `┃  ───◈ .𝗞𝗜𝗖𝗞 @𝗨𝗦𝗘𝗥\n` +
+                `┃  ───◈ .𝗔𝗗𝗗 <𝗡𝗨𝗠𝗕𝗘𝗥>\n` +
+                `┃  ───◈ .𝗣𝗥𝗢𝗠𝗢𝗧𝗘 @𝗨𝗦𝗘𝗥\n` +
+                `┃  ───◈ .𝗗𝗘𝗠𝗢𝗧𝗘 @𝗨𝗦𝗘𝗥\n` +
+                `┃  ───◈ .𝗠𝗨𝗧𝗘 <𝗠𝗜𝗡𝗦>\n` +
+                `┃  ───◈ .𝗨𝗡𝗠𝗨𝗧𝗘\n` +
+                `┃  ───◈ .𝗟𝗜𝗡𝗞\n` +
+                `┃  ───◈ .𝗚𝗟𝗜𝗡𝗞\n` +
+                `┃  ───◈ .𝗥𝗘𝗦𝗘𝗧𝗟𝗜𝗡𝗞\n` +
+                `┃  ───◈ .𝗥𝗘𝗩𝗢𝗞𝗘\n` +
+                `┃  ───◈ .𝗧𝗔𝗚𝗔𝗟𝗟 <𝗧𝗘𝗫𝗧>\n` +
+                `┃  ───◈ .𝗧𝗔𝗚𝗔𝗗𝗠𝗜𝗡 <𝗧𝗘𝗫𝗧>\n` +
+                `┃  ───◈ .𝗧𝗔𝗚𝗡𝗢𝗧𝗔𝗗𝗠𝗜𝗡 <𝗧𝗘𝗫𝗧>\n` +
+                `┃  ───◈ .𝗛𝗜𝗗𝗘𝗧𝗔𝗚 <𝗧𝗘𝗫𝗧>\n` +
+                `┃  ───◈ .𝗧𝗔𝗚𝗚𝗛𝗢𝗦𝗧\n` +
+                `┃  ───◈ .𝗚𝗛𝗢𝗦𝗧𝗦\n` +
+                `┃  ───◈ .𝗪𝗔𝗥𝗡 @𝗨𝗦𝗘𝗥\n` +
+                `┃  ───◈ .𝗪𝗔𝗥𝗡𝗜𝗡𝗚𝗦 @𝗨𝗦𝗘𝗥\n` +
+                `┃  ───◈ .𝗥𝗘𝗦𝗘𝗧𝗪𝗔𝗥𝗡 @𝗨𝗦𝗘𝗥\n` +
+                `┃  ───◈ .𝗨𝗡𝗪𝗔𝗥𝗡\n` +
+                `┃  ───◈ .𝗟𝗘𝗔𝗩𝗘\n` +
+                `┃  ───◈ .𝗟𝗘𝗔𝗩𝗘𝗚𝗖\n` +
+                `┃  ───◈ .𝗚𝗥𝗢𝗨𝗣𝗜𝗡𝗙𝗢\n` +
+                `┃  ───◈ .𝗜𝗡𝗙𝗢𝗚𝗣\n` +
+                `┃  ───◈ .𝗦𝗧𝗔𝗙𝗙\n` +
+                `┃  ───◈ .𝗔𝗗𝗠𝗜𝗡𝗦\n` +
+                `┃  ───◈ .𝗔𝗗𝗠𝗜𝗡𝗟𝗢𝗖𝗞\n` +
+                `┃  ───◈ .𝗦𝗘𝗧𝗚𝗡𝗔𝗠𝗘 <𝗡𝗔𝗠𝗘>\n` +
+                `┃  ───◈ .𝗦𝗘𝗧𝗚𝗗𝗘𝗦𝗖 <𝗗𝗘𝗦𝗖>\n` +
+                `┃  ───◈ .𝗦𝗘𝗧𝗚𝗣𝗣\n` +
+                `┃  ───◈ .𝗪𝗘𝗟𝗖𝗢𝗠𝗘 𝗢𝗡/𝗢𝗙𝗙\n` +
+                `┃  ───◈ .𝗚𝗢𝗢𝗗𝗕𝗬𝗘 𝗢𝗡/𝗢𝗙𝗙\n` +
+                `┃  ───◈ .𝗔𝗨𝗧𝗢𝗥𝗘𝗤𝗔𝗖𝗖𝗘𝗣𝗧 𝗢𝗡/𝗢𝗙𝗙/𝗡𝗢𝗪\n` +
+                `┃  ───◈ .𝗔𝗡𝗧𝗜𝗟𝗜𝗡𝗞 𝗢𝗡/𝗢𝗙𝗙\n` +
+                `┃  ───◈ .𝗔𝗡𝗧𝗜𝗧𝗔𝗚 𝗢𝗡/𝗢𝗙𝗙\n` +
+                `┃  ───◈ .𝗔𝗡𝗧𝗜𝗕𝗔𝗗𝗪𝗢𝗥𝗗 𝗢𝗡/𝗢𝗙𝗙\n` +
+                `┃  ───◈ .𝗔𝗡𝗧𝗜𝗙𝗢𝗥𝗘𝗜𝗚𝗡 𝗢𝗡/𝗢𝗙𝗙\n` +
+                `┃  ───◈ .𝗔𝗡𝗧𝗜𝗦𝗣𝗔𝗠 𝗢𝗡/𝗢𝗙𝗙\n` +
+                `╰━━━━━━━━━━━━━━╯\n\n`;
         }
 
         // Section: Owner Control (Shown to Owner / Sudo)
         if (isOwner) {
-            helpMessage += `╭─〔 ♛ 𝗢𝗪𝗡𝗘𝗥 𝗖𝗢𝗡𝗧𝗥𝗢𝗟 〕\n` +
-                `│  *Visible to Bot Owner*\n` +
-                `│\n` +
-                `│  *.mode public/private*\n` +
-                `│  *.restart* 〔*.reboot*〕\n` +
-                `│  *.broadcast <text>* 〔*.bc*〕\n` +
-                `│  *.block <number>*\n` +
-                `│  *.unblock <number>*\n` +
-                `│  *.setname <name>*\n` +
-                `│  *.setbio <text>* 〔*.setabout*〕\n` +
-                `│  *.setpp*\n` +
-                `│  *.setmenudp* 〔*.setdp*〕\n` +
-                `│  *.setdpd* 〔*.setdpdefault*〕\n` +
-                `│  *.setmenumusic* 〔*.setmusic*〕\n` +
-                `│  *.clearsession*\n` +
-                `│  *.cleartmp*\n` +
-                `│  *.update*\n` +
-                `│  *.autostatus on/off*\n` +
-                `│  *.autoreact on/off*\n` +
-                `│  *.autotyping on/off*\n` +
-                `│  *.autoread on/off*\n` +
-                `│  *.autojoinlinks on/off*\n` +
-                `│  *.anticall on/off*\n` +
-                `│  *.pmblocker on/off*\n` +
-                `│  *.smartreply on/off*\n` +
-                `│  *.chatbot on/off*\n` +
-                `│  *.antidelete on/off*\n` +
-                `│  *.sudo add/del*\n` +
-                `│  *.pair*\n` +
-                `╰──────────────\n\n`;
+            helpMessage += `╭━━〔 ✦ 𝗢𝗪𝗡𝗘𝗥 𝗖𝗢𝗡𝗧𝗥𝗢𝗟 〕━━╮\n` +
+                `┃  *Visible to Bot Owner*\n` +
+                `┃\n` +
+                `┃  ───◈ .𝗠𝗢𝗗𝗘 𝗣𝗨𝗕𝗟𝗜𝗖/𝗣𝗥𝗜𝗩𝗔𝗧𝗘\n` +
+                `┃  ───◈ .𝗥𝗘𝗦𝗧𝗔𝗥𝗧\n` +
+                `┃  ───◈ .𝗥𝗘𝗕𝗢𝗢𝗧\n` +
+                `┃  ───◈ .𝗕𝗥𝗢𝗔𝗗𝗖𝗔𝗦𝗧 <𝗧𝗘𝗫𝗧>\n` +
+                `┃  ───◈ .𝗕𝗖\n` +
+                `┃  ───◈ .𝗕𝗟𝗢𝗖𝗞 <𝗡𝗨𝗠𝗕𝗘𝗥>\n` +
+                `┃  ───◈ .𝗨𝗡𝗕𝗟𝗢𝗖𝗞 <𝗡𝗨𝗠𝗕𝗘𝗥>\n` +
+                `┃  ───◈ .𝗦𝗘𝗧𝗡𝗔𝗠𝗘 <𝗡𝗔𝗠𝗘>\n` +
+                `┃  ───◈ .𝗦𝗘𝗧𝗕𝗜𝗢 <𝗧𝗘𝗫𝗧>\n` +
+                `┃  ───◈ .𝗦𝗘𝗧𝗔𝗕𝗢𝗨𝗧\n` +
+                `┃  ───◈ .𝗦𝗘𝗧𝗣𝗣\n` +
+                `┃  ───◈ .𝗦𝗘𝗧𝗠𝗘𝗡𝗨𝗗𝗣\n` +
+                `┃  ───◈ .𝗦𝗘𝗧𝗗𝗣\n` +
+                `┃  ───◈ .𝗦𝗘𝗧𝗗𝗣𝗗\n` +
+                `┃  ───◈ .𝗦𝗘𝗧𝗗𝗣𝗗𝗘𝗙𝗔𝗨𝗟𝗧\n` +
+                `┃  ───◈ .𝗦𝗘𝗧𝗠𝗘𝗡𝗨𝗠𝗨𝗦𝗜𝗖\n` +
+                `┃  ───◈ .𝗦𝗘𝗧𝗠𝗨𝗦𝗜𝗖\n` +
+                `┃  ───◈ .𝗖𝗟𝗘𝗔𝗥𝗦𝗘𝗦𝗦𝗜𝗢𝗡\n` +
+                `┃  ───◈ .𝗖𝗟𝗘𝗔𝗥𝗧𝗠𝗣\n` +
+                `┃  ───◈ .𝗨𝗣𝗗𝗔𝗧𝗘\n` +
+                `┃  ───◈ .𝗔𝗨𝗧𝗢𝗦𝗧𝗔𝗧𝗨𝗦 𝗢𝗡/𝗢𝗙𝗙\n` +
+                `┃  ───◈ .𝗔𝗨𝗧𝗢𝗚𝗥𝗢𝗨𝗣𝗦𝗧𝗔𝗧𝗨𝗦 <𝗢𝗡/𝗢𝗙𝗙>\n` +
+                `┃  ───◈ .𝗔𝗨𝗧𝗢𝗦𝗧𝗔𝗧𝗨𝗦𝗩𝗜𝗘𝗪 <𝗢𝗡/𝗢𝗙𝗙>\n` +
+                `┃  ───◈ .𝗔𝗨𝗧𝗢𝗥𝗘𝗔𝗖𝗧 𝗢𝗡/𝗢𝗙𝗙\n` +
+                `┃  ───◈ .𝗔𝗨𝗧𝗢𝗧𝗬𝗣𝗜𝗡𝗚 𝗢𝗡/𝗢𝗙𝗙\n` +
+                `┃  ───◈ .𝗔𝗨𝗧𝗢𝗥𝗘𝗔𝗗 𝗢𝗡/𝗢𝗙𝗙\n` +
+                `┃  ───◈ .𝗔𝗨𝗧𝗢𝗝𝗢𝗜𝗡𝗟𝗜𝗡𝗞𝗦 𝗢𝗡/𝗢𝗙𝗙\n` +
+                `┃  ───◈ .𝗔𝗡𝗧𝗜𝗖𝗔𝗟𝗟 𝗢𝗡/𝗢𝗙𝗙\n` +
+                `┃  ───◈ .𝗣𝗠𝗕𝗟𝗢𝗖𝗞𝗘𝗥 𝗢𝗡/𝗢𝗙𝗙\n` +
+                `┃  ───◈ .𝗦𝗠𝗔𝗥𝗧𝗥𝗘𝗣𝗟𝗬 𝗢𝗡/𝗢𝗙𝗙\n` +
+                `┃  ───◈ .𝗖𝗛𝗔𝗧𝗕𝗢𝗧 𝗢𝗡/𝗢𝗙𝗙\n` +
+                `┃  ───◈ .𝗔𝗡𝗧𝗜𝗗𝗘𝗟𝗘𝗧𝗘 𝗢𝗡/𝗢𝗙𝗙\n` +
+                `┃  ───◈ .𝗦𝗨𝗗𝗢 𝗔𝗗𝗗/𝗗𝗘𝗟\n` +
+                `┃  ───◈ .𝗣𝗔𝗜𝗥\n` +
+                `╰━━━━━━━━━━━━━━╯\n\n`;
         }
 
-        helpMessage += `╭──────────────\n` +
-            `│  ✦ *𝗭𝗢𝗫𝗘𝗥 𝗕𝗢𝗧* ✦\n` +
-            `╰──────────────`;
+        helpMessage += `╭━━━〔 👑 𝗭𝗢𝗫𝗘𝗥  〕━━━╮\n` +
+            `┃  𝗣𝗢𝗪𝗘𝗥𝗘𝗗 𝗕𝗬 𝗭𝗢𝗫𝗘𝗥\n` +
+            `╰━━━━━━━━━━━━━━━━━━╯`;
 
         const candidatePaths = [
             path.resolve(__dirname, '..', 'assets', 'images', 'custom_menu.jpg'),

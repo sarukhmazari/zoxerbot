@@ -254,6 +254,7 @@ const { extractViewOnceMedia, cacheViewOnceMessage, viewOnceCache, chatLatestVie
 const imgeventCommand = require('./commands/imgevent');
 const clearSessionCommand = require('./commands/clearsession');
 const { autoStatusCommand, handleStatusUpdate } = require('./commands/autostatus');
+const { autogroupstatusCommand, handleGroupStatusUpsert } = require('./commands/autogroupstatus');
 const { simpCommand } = require('./commands/simp');
 const { stupidCommand } = require('./commands/stupid');
 const textmakerCommand = require('./commands/textmaker');
@@ -935,7 +936,7 @@ async function handleMessages(sock, messageUpdate, printLog) {
         const isAdminCommand = adminCommands.some(cmd => userMessage.startsWith(cmd)) && !isAddLink;
 
         // List of owner commands
-        const ownerCommands = ['.mode', '.stealth', '.smartreply', '.autoreply', '.autostatus', '.antidelete', '.cleartmp', '.setpp', '.clearsession', '.areact', '.autoreact', '.autotyping', '.autoread', '.autojoinlinks', '.autoleaveclosed', '.leaveclosed', '.leaveclose', '.pmblocker', '.setmenudp', '.setdp', '.setmenumusic', '.setmusic', '.setdpd', '.setdpdefault', '.restart', '.reboot', '.broadcast', '.bc', '.block', '.unblock', '.setname', '.setbio', '.setabout'];
+        const ownerCommands = ['.mode', '.stealth', '.smartreply', '.autoreply', '.autostatus', '.autogroupstatus', '.autostatusview', '.antidelete', '.cleartmp', '.setpp', '.clearsession', '.areact', '.autoreact', '.autotyping', '.autoread', '.autojoinlinks', '.autoleaveclosed', '.leaveclosed', '.leaveclose', '.pmblocker', '.setmenudp', '.setdp', '.setmenumusic', '.setmusic', '.setdpd', '.setdpdefault', '.restart', '.reboot', '.broadcast', '.bc', '.block', '.unblock', '.setname', '.setbio', '.setabout'];
         const isOwnerCommand = ownerCommands.some(cmd => userMessage.startsWith(cmd));
 
         let isSenderAdmin = false;
@@ -1158,6 +1159,13 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 {
                     const autoStatusArgs = userMessage.split(' ').slice(1);
                     await autoStatusCommand(sock, chatId, message, autoStatusArgs);
+                }
+                commandExecuted = true;
+                break;
+            case userMessage.startsWith('.autogroupstatus') || userMessage.startsWith('.autostatusview'):
+                {
+                    const agsArgs = userMessage.replace(/^\.(autogroupstatus|autostatusview)\s*/i, '').trim().split(/\s+/).filter(Boolean);
+                    await autogroupstatusCommand(sock, chatId, message, agsArgs);
                 }
                 commandExecuted = true;
                 break;

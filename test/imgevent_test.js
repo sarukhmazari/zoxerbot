@@ -57,7 +57,7 @@ async function main() {
 
         await imgeventCommand(mockSock, '120363024829384729@g.us', msg, '.imgevent');
         assert.strictEqual(sent.length, 1);
-        assert.ok(sent[0].content.text.includes('ZOXER PROMOTIONAL EVENT'));
+        assert.ok(sent[0].content.text.includes('EVENT ANNOUNCEMENT'));
         assert.ok(sent[0].content.text.includes('.imgevent Title | Description | HoursFromNow'));
     });
 
