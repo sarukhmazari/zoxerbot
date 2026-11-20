@@ -10,7 +10,8 @@ const {
     isHeartCommand,
     cleanJid,
     unwrapMessage,
-    getContextInfo
+    getContextInfo,
+    inspectViewOnce
 } = require('../commands/viewonce');
 
 console.log('========================================================');
@@ -138,8 +139,8 @@ async function runAll() {
         assert.strictEqual(extracted.caption, 'Memory pic');
     });
 
-    // 6. Test extractViewOnceMedia fallback to chatLatestViewOnce
-    await asyncTest('extractViewOnceMedia falls back to chatLatestViewOnce when stanzaId differs', async () => {
+    // 6. Test extractViewOnceMedia fallback to chatLatestViewOnce when no message is quoted
+    await asyncTest('extractViewOnceMedia falls back to chatLatestViewOnce when no message is quoted', async () => {
         const testBuf = Buffer.from('chat_latest_buffer_data');
         chatLatestViewOnce.set('1203638888@g.us', {
             msgId: 'some_other_id',
@@ -151,26 +152,15 @@ async function runAll() {
             timestamp: Date.now()
         });
 
-        const replyWithAlteredStanza = {
+        const standaloneVvMsg = {
             key: { remoteJid: '1203638888@g.us', id: 'reply_msg_2' },
             message: {
-                extendedTextMessage: {
-                    text: '.vv',
-                    contextInfo: {
-                        stanzaId: 'unknown_mobile_client_id_999',
-                        participant: '923232391033@s.whatsapp.net',
-                        quotedMessage: {
-                            viewOnceMessageV2: {
-                                message: { imageMessage: { mimetype: 'image/jpeg' } }
-                            }
-                        }
-                    }
-                }
+                conversation: '.vv'
             }
         };
 
-        const extracted = await extractViewOnceMedia(replyWithAlteredStanza);
-        assert.ok(extracted, 'Should extract from chatLatestViewOnce fallback');
+        const extracted = await extractViewOnceMedia(standaloneVvMsg);
+        assert.ok(extracted, 'Should extract from chatLatestViewOnce fallback for unquoted .vv');
         assert.strictEqual(extracted.buffer.toString(), testBuf.toString());
         assert.strictEqual(extracted.caption, 'Latest video');
     });
@@ -315,34 +305,35 @@ async function runAll() {
         assert.strictEqual(extracted.caption, 'Device sent pic');
     });
 
-    // 11. Test extractViewOnceMedia cross-matching with @lid
-    await asyncTest('extractViewOnceMedia cross-matches cleaned sender / LID in chatLatestViewOnce', async () => {
-        const lidSender = '123456789:5@lid';
-        const cleanedLid = '123456789@lid';
-        const testBuf = Buffer.from('lid_chat_buffer_data');
-
-        // Incoming viewonce cached with cleaned sender
-        chatLatestViewOnce.set(cleanedLid, {
-            msgId: 'msg_from_lid_user',
-            chatId: '923232391033@s.whatsapp.net',
+    // 11. Test that quoting an unknown/non-VO message does NOT return a random image
+    await asyncTest('extractViewOnceMedia never falls back to random chatLatestViewOnce if stanzaId is quoted', async () => {
+        const testBuf = Buffer.from('random_unrelated_photo');
+        chatLatestViewOnce.set('1203637777@g.us', {
+            msgId: 'unrelated_id',
+            chatId: '1203637777@g.us',
             buffer: testBuf,
             mediaType: 'image',
             mimeType: 'image/jpeg',
-            caption: 'LID captured photo',
+            caption: 'Unrelated random image',
             timestamp: Date.now()
         });
 
-        const replyFromLid = {
-            key: { remoteJid: '923232391033@s.whatsapp.net', participant: lidSender, id: 'reply_lid_user' },
+        // User quotes a message whose stanzaId is not in cache/disk
+        const quotedUnrelated = {
+            key: { remoteJid: '1203637777@g.us', id: 'reply_quoted_msg' },
             message: {
-                conversation: '❤️'
+                extendedTextMessage: {
+                    text: '.vv',
+                    contextInfo: {
+                        stanzaId: 'non_existent_vo_id',
+                        quotedMessage: { conversation: 'Just text, not VO' }
+                    }
+                }
             }
         };
 
-        const extracted = await extractViewOnceMedia(replyFromLid);
-        assert.ok(extracted, 'Should match via cleanedSender candidate in chatLatestViewOnce');
-        assert.strictEqual(extracted.buffer.toString(), testBuf.toString());
-        assert.strictEqual(extracted.caption, 'LID captured photo');
+        const extracted = await extractViewOnceMedia(quotedUnrelated);
+        assert.strictEqual(extracted, null, 'Must NOT return random image from chat when specific message is quoted');
     });
 
     // 12. Test disk cache fallback when in-memory cache has buffer: undefined (post-restart state)
@@ -388,6 +379,48 @@ async function runAll() {
         assert.ok(extracted, 'Must load buffer from disk');
         assert.strictEqual(extracted.buffer.toString(), testBuf.toString());
         assert.strictEqual(extracted.caption, 'Recovered from disk');
+    });
+
+    // 13. Test inspectViewOnce strictly rejects normal photos and channel posts
+    test('inspectViewOnce rejects regular photos, group ads, and channel posts', () => {
+        const regularPhoto = {
+            key: { remoteJid: '120363408805230855@g.us', id: 'REGULAR_PHOTO_1' },
+            message: {
+                imageMessage: {
+                    mimetype: 'image/jpeg',
+                    caption: 'Regular group advertisement'
+                    // No viewOnce: true!
+                }
+            }
+        };
+        assert.strictEqual(inspectViewOnce(regularPhoto), null, 'Must reject regular photo');
+
+        const channelPost = {
+            key: { remoteJid: '120363404139113188@newsletter', id: 'CHANNEL_POST_1' },
+            message: {
+                viewOnceMessageV2: {
+                    message: {
+                        imageMessage: { mimetype: 'image/jpeg' }
+                    }
+                }
+            }
+        };
+        assert.strictEqual(inspectViewOnce(channelPost), null, 'Must reject newsletter/channel post');
+
+        const realViewOnce = {
+            key: { remoteJid: '923232391033@s.whatsapp.net', id: 'REAL_VO_1' },
+            message: {
+                viewOnceMessageV2: {
+                    message: {
+                        imageMessage: { mimetype: 'image/jpeg', caption: 'Real view once' }
+                    }
+                }
+            }
+        };
+        const inspected = inspectViewOnce(realViewOnce);
+        assert.ok(inspected, 'Must accept real view once');
+        assert.strictEqual(inspected.isViewOnce, true);
+        assert.strictEqual(inspected.caption, 'Real view once');
     });
 
     console.log('\n========================================================');

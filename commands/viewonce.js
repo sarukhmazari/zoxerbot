@@ -277,6 +277,124 @@ async function downloadMediaBuffer(mediaContent, mediaType) {
 }
 
 /**
+ * Strictly inspects if a message is genuine View-Once media.
+ * Filters out all regular images, newsletter/channel posts, status broadcasts, and non-VO media.
+ * Returns { mediaContent, mediaType, mimeType, caption, isPtt, isViewOnce: true } or null.
+ */
+function inspectViewOnce(message) {
+    if (!message) return null;
+    const chatId = message.key?.remoteJid;
+    if (chatId?.endsWith('@newsletter') || chatId === 'status@broadcast') {
+        return null; // Newsletters & status broadcasts never have View-Once media
+    }
+
+    let current = message.message || message;
+    let isVO = false;
+    const maxDepth = 15;
+    let depth = 0;
+
+    while (current && typeof current === 'object' && depth < maxDepth) {
+        depth++;
+        if (current.viewOnceMessage?.message) {
+            isVO = true;
+            current = current.viewOnceMessage.message;
+        } else if (current.viewOnceMessageV2?.message) {
+            isVO = true;
+            current = current.viewOnceMessageV2.message;
+        } else if (current.viewOnceMessageV2Extension?.message) {
+            isVO = true;
+            current = current.viewOnceMessageV2Extension.message;
+        } else if (current.ephemeralMessage?.message) {
+            current = current.ephemeralMessage.message;
+        } else if (current.deviceSentMessage?.message) {
+            current = current.deviceSentMessage.message;
+        } else if (current.documentWithCaptionMessage?.message) {
+            current = current.documentWithCaptionMessage.message;
+        } else if (current.editedMessage?.message) {
+            const inner = current.editedMessage.message;
+            current = inner?.protocolMessage?.editedMessage || inner;
+        } else if (current.associatedChildMessage?.message) {
+            current = current.associatedChildMessage.message;
+        } else if (current.botInvokeMessage?.message) {
+            current = current.botInvokeMessage.message;
+        } else if (current.groupStatusMessage?.message) {
+            current = current.groupStatusMessage.message;
+        } else if (current.groupStatusMessageV2?.message) {
+            current = current.groupStatusMessageV2.message;
+        } else if (
+            current.message &&
+            typeof current.message === 'object' &&
+            !current.imageMessage &&
+            !current.videoMessage &&
+            !current.audioMessage &&
+            !current.documentMessage &&
+            !current.ptvMessage
+        ) {
+            current = current.message;
+        } else {
+            break;
+        }
+    }
+
+    if (!current || typeof current !== 'object') return null;
+
+    let mediaContent = null;
+    let mediaType = null;
+    let mimeType = null;
+    let caption = '';
+    let isPtt = false;
+
+    if (current.imageMessage) {
+        if (isVO || current.imageMessage.viewOnce || current.imageMessage.viewOnceMessage) {
+            mediaContent = current.imageMessage;
+            mediaType = 'image';
+            mimeType = current.imageMessage.mimetype || 'image/jpeg';
+            caption = current.imageMessage.caption || '';
+        }
+    } else if (current.videoMessage) {
+        if (isVO || current.videoMessage.viewOnce || current.videoMessage.viewOnceMessage) {
+            mediaContent = current.videoMessage;
+            mediaType = 'video';
+            mimeType = current.videoMessage.mimetype || 'video/mp4';
+            caption = current.videoMessage.caption || '';
+        }
+    } else if (current.ptvMessage) {
+        if (isVO || current.ptvMessage.viewOnce || current.ptvMessage.viewOnceMessage) {
+            mediaContent = current.ptvMessage;
+            mediaType = 'video';
+            mimeType = current.ptvMessage.mimetype || 'video/mp4';
+            caption = current.ptvMessage.caption || '';
+        }
+    } else if (current.audioMessage) {
+        if (isVO || current.audioMessage.viewOnce || current.audioMessage.viewOnceMessage) {
+            mediaContent = current.audioMessage;
+            mediaType = 'audio';
+            mimeType = current.audioMessage.mimetype || 'audio/ogg; codecs=opus';
+            caption = '';
+            isPtt = Boolean(current.audioMessage.ptt);
+        }
+    } else if (current.documentMessage) {
+        if (isVO || current.documentMessage.viewOnce || current.documentMessage.viewOnceMessage) {
+            mediaContent = current.documentMessage;
+            mediaType = 'document';
+            mimeType = current.documentMessage.mimetype || 'application/octet-stream';
+            caption = current.documentMessage.caption || current.documentMessage.fileName || '';
+        }
+    }
+
+    if (!mediaContent) return null;
+
+    return {
+        mediaContent,
+        mediaType,
+        mimeType,
+        caption,
+        isPtt,
+        isViewOnce: true
+    };
+}
+
+/**
  * Caches incoming view-once messages by EAGERLY downloading the buffer immediately upon arrival.
  * This guarantees the media is captured while WhatsApp CDN tokens and media keys are 100% active!
  */
@@ -286,101 +404,67 @@ function cacheViewOnceMessage(message) {
         const msgId = message.key.id;
         const chatId = message.key.remoteJid;
 
-        const unwrapped = unwrapMessage(message);
-        if (!unwrapped || typeof unwrapped !== 'object') return;
-
-        let mediaContent = null;
-        let mediaType = null;
-        let mimeType = null;
-        let caption = '';
-        let isPtt = false;
-
-        if (unwrapped.imageMessage) {
-            mediaContent = unwrapped.imageMessage;
-            mediaType = 'image';
-            mimeType = unwrapped.imageMessage.mimetype || 'image/jpeg';
-            caption = unwrapped.imageMessage.caption || '';
-        } else if (unwrapped.videoMessage) {
-            mediaContent = unwrapped.videoMessage;
-            mediaType = 'video';
-            mimeType = unwrapped.videoMessage.mimetype || 'video/mp4';
-            caption = unwrapped.videoMessage.caption || '';
-        } else if (unwrapped.ptvMessage) {
-            mediaContent = unwrapped.ptvMessage;
-            mediaType = 'video';
-            mimeType = unwrapped.ptvMessage.mimetype || 'video/mp4';
-            caption = unwrapped.ptvMessage.caption || '';
-        } else if (unwrapped.audioMessage) {
-            mediaContent = unwrapped.audioMessage;
-            mediaType = 'audio';
-            mimeType = unwrapped.audioMessage.mimetype || 'audio/ogg; codecs=opus';
-            caption = '';
-            isPtt = Boolean(unwrapped.audioMessage.ptt);
-        } else if (unwrapped.documentMessage) {
-            mediaContent = unwrapped.documentMessage;
-            mediaType = 'document';
-            mimeType = unwrapped.documentMessage.mimetype || 'application/octet-stream';
-            caption = unwrapped.documentMessage.caption || unwrapped.documentMessage.fileName || '';
+        // CRITICAL: Strictly verify this is a genuine View-Once message!
+        const voInfo = inspectViewOnce(message);
+        if (!voInfo || !voInfo.isViewOnce || !voInfo.mediaContent) {
+            return; // Ignore all regular photos, stickers, group media, and newsletter posts!
         }
 
-        if (mediaContent && (mediaContent.mediaKey || mediaContent.url || mediaContent.directPath)) {
-            // Asynchronously download the buffer immediately in background
-            downloadMediaBuffer(mediaContent, mediaType).then(buffer => {
-                if (buffer && buffer.length > 0) {
-                    const entry = {
-                        msgId,
-                        chatId,
-                        rawMessage: message,
-                        mediaContent,
-                        mediaType,
-                        mimeType,
-                        caption,
-                        isPtt,
-                        buffer,
-                        timestamp: Date.now()
-                    };
+        const { mediaContent, mediaType, mimeType, caption, isPtt } = voInfo;
+        if (!mediaContent.mediaKey && !mediaContent.url && !mediaContent.directPath) {
+            return;
+        }
 
-                    const cleanedChatId = cleanJid(chatId);
-                    const rawSender = message.key?.participant || message.key?.remoteJid;
-                    const cleanedSender = cleanJid(rawSender);
+        // Asynchronously download the buffer immediately in background
+        downloadMediaBuffer(mediaContent, mediaType).then(buffer => {
+            if (buffer && buffer.length > 0) {
+                const entry = {
+                    msgId,
+                    chatId,
+                    rawMessage: message,
+                    mediaContent,
+                    mediaType,
+                    mimeType,
+                    caption,
+                    isPtt,
+                    buffer,
+                    timestamp: Date.now()
+                };
 
-                    viewOnceCache.set(msgId, entry);
-                    if (chatId) {
-                        viewOnceCache.set(`${chatId}:${msgId}`, entry);
-                        chatLatestViewOnce.set(chatId, entry);
-                    }
-                    if (cleanedChatId && cleanedChatId !== chatId) {
-                        viewOnceCache.set(`${cleanedChatId}:${msgId}`, entry);
-                        chatLatestViewOnce.set(cleanedChatId, entry);
-                    }
-                    if (cleanedSender && cleanedSender !== chatId && cleanedSender !== cleanedChatId) {
-                        viewOnceCache.set(`${cleanedSender}:${msgId}`, entry);
-                        chatLatestViewOnce.set(cleanedSender, entry);
-                    }
+                const cleanedChatId = cleanJid(chatId);
 
-                    // Save to persistent disk cache
-                    saveToDiskCache(msgId, entry);
-
-                    if (viewOnceCache.size > MAX_CACHE_SIZE) {
-                        const oldestKey = viewOnceCache.keys().next().value;
-                        viewOnceCache.delete(oldestKey);
-                    }
+                viewOnceCache.set(msgId, entry);
+                if (chatId) {
+                    viewOnceCache.set(`${chatId}:${msgId}`, entry);
+                    chatLatestViewOnce.set(chatId, entry);
                 }
-            }).catch(dlErr => {
-                console.warn('[VIEWONCE] Eager download background error:', dlErr.message);
-            });
-        }
+                if (cleanedChatId && cleanedChatId !== chatId) {
+                    viewOnceCache.set(`${cleanedChatId}:${msgId}`, entry);
+                    chatLatestViewOnce.set(cleanedChatId, entry);
+                }
+
+                // Save to persistent disk cache
+                saveToDiskCache(msgId, entry);
+
+                if (viewOnceCache.size > MAX_CACHE_SIZE) {
+                    const oldestKey = viewOnceCache.keys().next().value;
+                    viewOnceCache.delete(oldestKey);
+                }
+            }
+        }).catch(dlErr => {
+            console.warn('[VIEWONCE] Eager download background error:', dlErr.message);
+        });
     } catch (_) {}
 }
 
 /**
  * REUSABLE: Extract view-once media and return buffer.
- * Multi-layer fallback guarantees 100% detection:
- *  1. In-memory eager cache by stanzaId (checks raw and cleaned JIDs)
- *  2. Disk cache by stanzaId
+ * Multi-layer fallback guarantees 100% accurate detection:
+ *  1. In-memory eager cache by quoted stanzaId
+ *  2. Disk cache by quoted stanzaId
  *  3. Direct decryption from quotedMessage (if mediaKey present)
- *  4. Chat-level latest view-once fallback (across candidate chat and sender JIDs)
- *  5. Direct decryption from message itself
+ *  4. Chat-level latest view-once fallback (ONLY when user didn't quote a specific message)
+ *  5. Direct decryption from message itself (ONLY when user didn't quote a specific message)
  *
  * Returns: { mediaContent, mediaType, mimeType, caption, buffer, isPtt } or null
  */
@@ -390,8 +474,6 @@ async function extractViewOnceMedia(message) {
 
         const rawChatId = message.key?.remoteJid;
         const cleanedChatId = cleanJid(rawChatId);
-        const rawSender = message.key?.participant || message.key?.remoteJid;
-        const cleanedSender = cleanJid(rawSender);
 
         const ctx = getContextInfo(message);
         const quotedRaw = ctx?.quotedMessage;
@@ -445,42 +527,9 @@ async function extractViewOnceMedia(message) {
 
         // 3. THIRD PRIORITY: Decrypt directly from quotedMessage object
         if (quotedRaw) {
-            const unwrappedQuoted = unwrapMessage(quotedRaw);
-            if (unwrappedQuoted && typeof unwrappedQuoted === 'object') {
-                let mediaContent = null;
-                let mediaType = null;
-                let mimeType = null;
-                let caption = '';
-                let isPtt = false;
-
-                if (unwrappedQuoted.imageMessage) {
-                    mediaContent = unwrappedQuoted.imageMessage;
-                    mediaType = 'image';
-                    mimeType = unwrappedQuoted.imageMessage.mimetype || 'image/jpeg';
-                    caption = unwrappedQuoted.imageMessage.caption || '';
-                } else if (unwrappedQuoted.videoMessage) {
-                    mediaContent = unwrappedQuoted.videoMessage;
-                    mediaType = 'video';
-                    mimeType = unwrappedQuoted.videoMessage.mimetype || 'video/mp4';
-                    caption = unwrappedQuoted.videoMessage.caption || '';
-                } else if (unwrappedQuoted.ptvMessage) {
-                    mediaContent = unwrappedQuoted.ptvMessage;
-                    mediaType = 'video';
-                    mimeType = unwrappedQuoted.ptvMessage.mimetype || 'video/mp4';
-                    caption = unwrappedQuoted.ptvMessage.caption || '';
-                } else if (unwrappedQuoted.audioMessage) {
-                    mediaContent = unwrappedQuoted.audioMessage;
-                    mediaType = 'audio';
-                    mimeType = unwrappedQuoted.audioMessage.mimetype || 'audio/ogg; codecs=opus';
-                    caption = '';
-                    isPtt = Boolean(unwrappedQuoted.audioMessage.ptt);
-                } else if (unwrappedQuoted.documentMessage) {
-                    mediaContent = unwrappedQuoted.documentMessage;
-                    mediaType = 'document';
-                    mimeType = unwrappedQuoted.documentMessage.mimetype || 'application/octet-stream';
-                    caption = unwrappedQuoted.documentMessage.caption || unwrappedQuoted.documentMessage.fileName || '';
-                }
-
+            const voQuoted = inspectViewOnce(quotedRaw);
+            if (voQuoted && voQuoted.mediaContent) {
+                const { mediaContent, mediaType, mimeType, caption, isPtt } = voQuoted;
                 if (mediaContent && (mediaContent.mediaKey || mediaContent.url || mediaContent.directPath)) {
                     const buf = await downloadMediaBuffer(mediaContent, mediaType);
                     if (buf && buf.length > 0) {
@@ -490,78 +539,48 @@ async function extractViewOnceMedia(message) {
             }
         }
 
-        // 4. FOURTH PRIORITY: Chat-level latest view-once fallback
-        // Check candidate chat keys (raw, cleaned, quoted participant, sender)
-        const candidateChatKeys = [
-            rawChatId,
-            cleanedChatId,
-            quotedParticipant,
-            cleanedSender
-        ].filter(Boolean);
+        // CRITICAL FIX: If user explicitly quoted a message with a stanzaId, and it was NOT found,
+        // NEVER fall back to a random previous image or channel post from chat history!
+        if (!quotedStanzaId) {
+            // 4. FOURTH PRIORITY: Chat-level latest view-once fallback ONLY when no message was quoted
+            const candidateChatKeys = [rawChatId, cleanedChatId].filter(Boolean);
 
-        for (const candidateKey of candidateChatKeys) {
-            if (chatLatestViewOnce.has(candidateKey)) {
-                const latest = chatLatestViewOnce.get(candidateKey);
-                // Within last 24 hours
-                if (latest && (Date.now() - (latest.timestamp || 0) < 24 * 60 * 60 * 1000)) {
-                    let buf = latest.buffer;
-                    if (!buf && latest.msgId) {
-                        const diskEntry = loadFromDiskCache(latest.msgId);
-                        if (diskEntry && diskEntry.buffer) buf = diskEntry.buffer;
-                    }
-                    if (!buf && latest.mediaContent) {
-                        buf = await downloadMediaBuffer(latest.mediaContent, latest.mediaType);
-                    }
-                    if (buf && buf.length > 0) {
-                        return {
-                            mediaContent: latest.mediaContent || null,
-                            mediaType: latest.mediaType || 'image',
-                            mimeType: latest.mimeType || 'image/jpeg',
-                            caption: latest.caption || '',
-                            buffer: buf,
-                            isPtt: Boolean(latest.isPtt)
-                        };
+            for (const candidateKey of candidateChatKeys) {
+                if (chatLatestViewOnce.has(candidateKey)) {
+                    const latest = chatLatestViewOnce.get(candidateKey);
+                    // Within last 24 hours
+                    if (latest && (Date.now() - (latest.timestamp || 0) < 24 * 60 * 60 * 1000)) {
+                        let buf = latest.buffer;
+                        if (!buf && latest.msgId) {
+                            const diskEntry = loadFromDiskCache(latest.msgId);
+                            if (diskEntry && diskEntry.buffer) buf = diskEntry.buffer;
+                        }
+                        if (!buf && latest.mediaContent) {
+                            buf = await downloadMediaBuffer(latest.mediaContent, latest.mediaType);
+                        }
+                        if (buf && buf.length > 0) {
+                            return {
+                                mediaContent: latest.mediaContent || null,
+                                mediaType: latest.mediaType || 'image',
+                                mimeType: latest.mimeType || 'image/jpeg',
+                                caption: latest.caption || '',
+                                buffer: buf,
+                                isPtt: Boolean(latest.isPtt)
+                            };
+                        }
                     }
                 }
             }
-        }
 
-        // 5. FIFTH PRIORITY: If message itself has media attached
-        const unwrappedSelf = unwrapMessage(message);
-        if (unwrappedSelf && typeof unwrappedSelf === 'object') {
-            let mediaContent = null;
-            let mediaType = null;
-            let mimeType = null;
-            let caption = '';
-            let isPtt = false;
-
-            if (unwrappedSelf.imageMessage) {
-                mediaContent = unwrappedSelf.imageMessage;
-                mediaType = 'image';
-                mimeType = unwrappedSelf.imageMessage.mimetype || 'image/jpeg';
-                caption = unwrappedSelf.imageMessage.caption || '';
-            } else if (unwrappedSelf.videoMessage) {
-                mediaContent = unwrappedSelf.videoMessage;
-                mediaType = 'video';
-                mimeType = unwrappedSelf.videoMessage.mimetype || 'video/mp4';
-                caption = unwrappedSelf.videoMessage.caption || '';
-            } else if (unwrappedSelf.ptvMessage) {
-                mediaContent = unwrappedSelf.ptvMessage;
-                mediaType = 'video';
-                mimeType = unwrappedSelf.ptvMessage.mimetype || 'video/mp4';
-                caption = unwrappedSelf.ptvMessage.caption || '';
-            } else if (unwrappedSelf.audioMessage) {
-                mediaContent = unwrappedSelf.audioMessage;
-                mediaType = 'audio';
-                mimeType = unwrappedSelf.audioMessage.mimetype || 'audio/ogg; codecs=opus';
-                caption = '';
-                isPtt = Boolean(unwrappedSelf.audioMessage.ptt);
-            }
-
-            if (mediaContent && (mediaContent.mediaKey || mediaContent.url || mediaContent.directPath)) {
-                const buf = await downloadMediaBuffer(mediaContent, mediaType);
-                if (buf && buf.length > 0) {
-                    return { mediaContent, mediaType, mimeType, caption, buffer: buf, isPtt };
+            // 5. FIFTH PRIORITY: If message itself has media attached
+            const voSelf = inspectViewOnce(message);
+            if (voSelf && voSelf.mediaContent) {
+                const { mediaContent, mediaType, mimeType, caption, isPtt } = voSelf;
+                if (mediaContent && (mediaContent.mediaKey || mediaContent.url || mediaContent.directPath)) {
+                    const buf = await downloadMediaBuffer(mediaContent, mediaType);
+                    if (buf && buf.length > 0) {
+                        return { mediaContent, mediaType, mimeType, caption, buffer: buf, isPtt };
+                    }
                 }
             }
         }
@@ -681,3 +700,4 @@ module.exports.isHeartCommand = isHeartCommand;
 module.exports.cleanJid = cleanJid;
 module.exports.unwrapMessage = unwrapMessage;
 module.exports.getContextInfo = getContextInfo;
+module.exports.inspectViewOnce = inspectViewOnce;
