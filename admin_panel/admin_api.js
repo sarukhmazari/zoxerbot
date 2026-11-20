@@ -141,7 +141,7 @@ function startAdminApi() {
 
     const requestId = crypto.randomUUID();
     const token = crypto.randomBytes(24).toString('hex');
-    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minute validity
+    const expiresAt = Date.now() + 2 * 60 * 1000; // 2 minute WhatsApp pairing validity
 
     try {
       // Register in tracking map
@@ -248,6 +248,14 @@ function startAdminApi() {
         phoneNumber,
         pairingCode: requestData.pairingCode,
         expiresInSeconds: Math.max(0, Math.round((expiresAt - Date.now()) / 1000))
+      });
+    }
+
+    if (currentState === 'IDLE' && requestData.status !== 'CONNECTED') {
+      pendingPairingRequests.delete(requestId);
+      return res.json({
+        status: 'EXPIRED',
+        message: 'Pairing session closed or expired. Please generate a fresh code.'
       });
     }
 
