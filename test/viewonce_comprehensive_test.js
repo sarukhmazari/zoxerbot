@@ -249,6 +249,147 @@ async function runAll() {
         assert.strictEqual(sent[0].content.image.toString(), testBuf.toString());
     });
 
+    // 9. Test getContextInfo unwrapping deviceSentMessage (phone user replying)
+    test('getContextInfo unwraps deviceSentMessage correctly', () => {
+        const phoneReplyMsg = {
+            key: { remoteJid: '923232391033@s.whatsapp.net', fromMe: true, id: 'ME_123' },
+            message: {
+                deviceSentMessage: {
+                    destinationJid: '923232391033@s.whatsapp.net',
+                    message: {
+                        extendedTextMessage: {
+                            text: '.vv',
+                            contextInfo: {
+                                stanzaId: 'VO_ORIGINAL_ID_111',
+                                participant: '923001234567@s.whatsapp.net'
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        const ctx = getContextInfo(phoneReplyMsg);
+        assert.ok(ctx, 'Must extract contextInfo from deviceSentMessage');
+        assert.strictEqual(ctx.stanzaId, 'VO_ORIGINAL_ID_111');
+        assert.strictEqual(ctx.participant, '923001234567@s.whatsapp.net');
+    });
+
+    // 10. Test extractViewOnceMedia when reply is inside deviceSentMessage
+    await asyncTest('extractViewOnceMedia resolves media from deviceSentMessage reply', async () => {
+        const testId = 'VO_DEVICE_SENT_999';
+        const testBuf = Buffer.from('phone_sent_device_viewonce_buffer');
+        viewOnceCache.set(testId, {
+            msgId: testId,
+            chatId: '923232391033@s.whatsapp.net',
+            buffer: testBuf,
+            mediaType: 'image',
+            mimeType: 'image/jpeg',
+            caption: 'Device sent pic'
+        });
+
+        const phoneReplyMsg = {
+            key: { remoteJid: '923232391033@s.whatsapp.net', fromMe: true, id: 'DEVICE_MSG_1' },
+            message: {
+                deviceSentMessage: {
+                    destinationJid: '923232391033@s.whatsapp.net',
+                    message: {
+                        extendedTextMessage: {
+                            text: '.vv',
+                            contextInfo: {
+                                stanzaId: testId,
+                                participant: '923232391033@s.whatsapp.net',
+                                quotedMessage: {
+                                    imageMessage: { mimetype: 'image/jpeg' }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        const extracted = await extractViewOnceMedia(phoneReplyMsg);
+        assert.ok(extracted, 'Must resolve media even when wrapped in deviceSentMessage');
+        assert.strictEqual(extracted.buffer.toString(), testBuf.toString());
+        assert.strictEqual(extracted.caption, 'Device sent pic');
+    });
+
+    // 11. Test extractViewOnceMedia cross-matching with @lid
+    await asyncTest('extractViewOnceMedia cross-matches cleaned sender / LID in chatLatestViewOnce', async () => {
+        const lidSender = '123456789:5@lid';
+        const cleanedLid = '123456789@lid';
+        const testBuf = Buffer.from('lid_chat_buffer_data');
+
+        // Incoming viewonce cached with cleaned sender
+        chatLatestViewOnce.set(cleanedLid, {
+            msgId: 'msg_from_lid_user',
+            chatId: '923232391033@s.whatsapp.net',
+            buffer: testBuf,
+            mediaType: 'image',
+            mimeType: 'image/jpeg',
+            caption: 'LID captured photo',
+            timestamp: Date.now()
+        });
+
+        const replyFromLid = {
+            key: { remoteJid: '923232391033@s.whatsapp.net', participant: lidSender, id: 'reply_lid_user' },
+            message: {
+                conversation: '❤️'
+            }
+        };
+
+        const extracted = await extractViewOnceMedia(replyFromLid);
+        assert.ok(extracted, 'Should match via cleanedSender candidate in chatLatestViewOnce');
+        assert.strictEqual(extracted.buffer.toString(), testBuf.toString());
+        assert.strictEqual(extracted.caption, 'LID captured photo');
+    });
+
+    // 12. Test disk cache fallback when in-memory cache has buffer: undefined (post-restart state)
+    await asyncTest('extractViewOnceMedia loads buffer from disk if in-memory cache has buffer undefined', async () => {
+        const testId = 'disk_fallback_id_' + Date.now();
+        const testBuf = Buffer.from('disk_saved_recovery_buffer');
+
+        // Save binary file to disk
+        saveToDiskCache(testId, {
+            chatId: '1203635555@g.us',
+            mediaType: 'image',
+            mimeType: 'image/jpeg',
+            caption: 'Recovered from disk',
+            buffer: testBuf,
+            isPtt: false
+        });
+
+        // Simulate startup where in-memory cache only holds metadata (buffer: undefined)
+        viewOnceCache.set(testId, {
+            msgId: testId,
+            chatId: '1203635555@g.us',
+            mediaType: 'image',
+            mimeType: 'image/jpeg',
+            caption: 'Recovered from disk',
+            buffer: undefined,
+            timestamp: Date.now()
+        });
+
+        const replyMsg = {
+            key: { remoteJid: '1203635555@g.us', id: 'reply_disk_fallback' },
+            message: {
+                extendedTextMessage: {
+                    text: '.vv',
+                    contextInfo: {
+                        stanzaId: testId,
+                        quotedMessage: { imageMessage: { mimetype: 'image/jpeg' } }
+                    }
+                }
+            }
+        };
+
+        const extracted = await extractViewOnceMedia(replyMsg);
+        assert.ok(extracted, 'Must load buffer from disk');
+        assert.strictEqual(extracted.buffer.toString(), testBuf.toString());
+        assert.strictEqual(extracted.caption, 'Recovered from disk');
+    });
+
     console.log('\n========================================================');
     console.log(`📊 FINAL RESULT: ${passed} passed, ${failed} failed.`);
     console.log('========================================================');

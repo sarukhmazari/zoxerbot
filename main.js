@@ -630,21 +630,39 @@ async function handleMessages(sock, messageUpdate, printLog) {
                     if (message.key?.fromMe && sock.user?.id) {
                         targetJid = jidNormalizedUser(sock.user.id);
                     }
+                    if (!targetJid && chatId) {
+                        targetJid = chatId;
+                    }
 
                     if (targetJid) {
-                        if (mediaType === 'image') {
-                            await sock.sendMessage(targetJid, { image: buffer, caption: caption ? `📝 *Caption:* ${caption}` : '👁️ *View-Once Photo*' });
-                        } else if (mediaType === 'video') {
-                            await sock.sendMessage(targetJid, { video: buffer, caption: caption ? `📝 *Caption:* ${caption}` : '👁️ *View-Once Video*' });
-                        } else if (mediaType === 'audio') {
-                            await sock.sendMessage(targetJid, { audio: buffer, mimetype: mimeType, ptt: Boolean(isPtt) });
-                            if (caption) await sock.sendMessage(targetJid, { text: `📝 *Caption:* ${caption}` });
-                        } else if (mediaType === 'document') {
-                            await sock.sendMessage(targetJid, { document: buffer, mimetype: mimeType, fileName: 'viewonce_file' });
+                        const sendMedia = async (dest) => {
+                            if (mediaType === 'image') {
+                                return await sock.sendMessage(dest, { image: buffer, caption: caption ? `📝 *Caption:* ${caption}` : '👁️ *View-Once Photo*' });
+                            } else if (mediaType === 'video') {
+                                return await sock.sendMessage(dest, { video: buffer, caption: caption ? `📝 *Caption:* ${caption}` : '👁️ *View-Once Video*' });
+                            } else if (mediaType === 'audio') {
+                                await sock.sendMessage(dest, { audio: buffer, mimetype: mimeType, ptt: Boolean(isPtt) });
+                                if (caption) await sock.sendMessage(dest, { text: `📝 *Caption:* ${caption}` });
+                                return;
+                            } else if (mediaType === 'document') {
+                                return await sock.sendMessage(dest, { document: buffer, mimetype: mimeType, fileName: 'viewonce_file' });
+                            }
+                        };
+
+                        try {
+                            await sendMedia(targetJid);
+                        } catch (sendErr) {
+                            if (chatId && chatId !== targetJid) {
+                                await sendMedia(chatId);
+                            } else {
+                                throw sendErr;
+                            }
                         }
 
                         console.log('Secret ❤ extraction sent privately to:', targetJid);
                     }
+                } else {
+                    console.warn(`[VIEWONCE] Secret ❤ command from ${userJid}: no view-once media detected in cache or quote.`);
                 }
             } catch (e) {
                 console.error('Secret ❤ extraction failed:', e.message);

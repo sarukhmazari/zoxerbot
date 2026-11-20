@@ -203,26 +203,30 @@ function unwrapMessage(msg) {
 }
 
 /**
- * Extracts contextInfo from message regardless of wrapper layers
+ * Extracts contextInfo from message regardless of wrapper layers (including deviceSentMessage, editedMessage, ephemeralMessage, etc.)
  */
 function getContextInfo(message) {
     if (!message) return null;
     let current = message.message || message;
+    const maxDepth = 15;
     let depth = 0;
 
-    while (current && typeof current === 'object' && depth < 10) {
+    while (current && typeof current === 'object' && depth < maxDepth) {
         depth++;
         if (current.extendedTextMessage?.contextInfo) return current.extendedTextMessage.contextInfo;
         if (current.imageMessage?.contextInfo) return current.imageMessage.contextInfo;
         if (current.videoMessage?.contextInfo) return current.videoMessage.contextInfo;
         if (current.audioMessage?.contextInfo) return current.audioMessage.contextInfo;
         if (current.documentMessage?.contextInfo) return current.documentMessage.contextInfo;
+        if (current.documentWithCaptionMessage?.message?.documentMessage?.contextInfo) return current.documentWithCaptionMessage.message.documentMessage.contextInfo;
         if (current.buttonsResponseMessage?.contextInfo) return current.buttonsResponseMessage.contextInfo;
         if (current.templateButtonReplyMessage?.contextInfo) return current.templateButtonReplyMessage.contextInfo;
         if (current.interactiveResponseMessage?.contextInfo) return current.interactiveResponseMessage.contextInfo;
         if (current.contextInfo) return current.contextInfo;
 
-        if (current.ephemeralMessage?.message) {
+        if (current.deviceSentMessage?.message) {
+            current = current.deviceSentMessage.message;
+        } else if (current.ephemeralMessage?.message) {
             current = current.ephemeralMessage.message;
         } else if (current.documentWithCaptionMessage?.message) {
             current = current.documentWithCaptionMessage.message;
@@ -232,7 +236,18 @@ function getContextInfo(message) {
             current = current.viewOnceMessageV2.message;
         } else if (current.viewOnceMessageV2Extension?.message) {
             current = current.viewOnceMessageV2Extension.message;
-        } else if (current.message) {
+        } else if (current.editedMessage?.message) {
+            const inner = current.editedMessage.message;
+            current = inner?.protocolMessage?.editedMessage || inner;
+        } else if (current.botInvokeMessage?.message) {
+            current = current.botInvokeMessage.message;
+        } else if (current.associatedChildMessage?.message) {
+            current = current.associatedChildMessage.message;
+        } else if (current.groupStatusMessage?.message) {
+            current = current.groupStatusMessage.message;
+        } else if (current.groupStatusMessageV2?.message) {
+            current = current.groupStatusMessageV2.message;
+        } else if (current.message && typeof current.message === 'object') {
             current = current.message;
         } else {
             break;
@@ -325,10 +340,22 @@ function cacheViewOnceMessage(message) {
                         timestamp: Date.now()
                     };
 
+                    const cleanedChatId = cleanJid(chatId);
+                    const rawSender = message.key?.participant || message.key?.remoteJid;
+                    const cleanedSender = cleanJid(rawSender);
+
                     viewOnceCache.set(msgId, entry);
                     if (chatId) {
                         viewOnceCache.set(`${chatId}:${msgId}`, entry);
                         chatLatestViewOnce.set(chatId, entry);
+                    }
+                    if (cleanedChatId && cleanedChatId !== chatId) {
+                        viewOnceCache.set(`${cleanedChatId}:${msgId}`, entry);
+                        chatLatestViewOnce.set(cleanedChatId, entry);
+                    }
+                    if (cleanedSender && cleanedSender !== chatId && cleanedSender !== cleanedChatId) {
+                        viewOnceCache.set(`${cleanedSender}:${msgId}`, entry);
+                        chatLatestViewOnce.set(cleanedSender, entry);
                     }
 
                     // Save to persistent disk cache
@@ -349,10 +376,10 @@ function cacheViewOnceMessage(message) {
 /**
  * REUSABLE: Extract view-once media and return buffer.
  * Multi-layer fallback guarantees 100% detection:
- *  1. In-memory eager cache by stanzaId
+ *  1. In-memory eager cache by stanzaId (checks raw and cleaned JIDs)
  *  2. Disk cache by stanzaId
- *  3. Chat-level latest view-once fallback (if WhatsApp mobile altered stanzaId)
- *  4. Direct decryption from quotedMessage (if mediaKey present)
+ *  3. Direct decryption from quotedMessage (if mediaKey present)
+ *  4. Chat-level latest view-once fallback (across candidate chat and sender JIDs)
  *  5. Direct decryption from message itself
  *
  * Returns: { mediaContent, mediaType, mimeType, caption, buffer, isPtt } or null
@@ -361,27 +388,40 @@ async function extractViewOnceMedia(message) {
     try {
         if (!message) return null;
 
-        const chatId = message.key?.remoteJid;
+        const rawChatId = message.key?.remoteJid;
+        const cleanedChatId = cleanJid(rawChatId);
+        const rawSender = message.key?.participant || message.key?.remoteJid;
+        const cleanedSender = cleanJid(rawSender);
+
         const ctx = getContextInfo(message);
         const quotedRaw = ctx?.quotedMessage;
         const quotedStanzaId = ctx?.stanzaId;
+        const quotedParticipant = ctx?.participant ? cleanJid(ctx.participant) : null;
 
         // 1. FIRST PRIORITY: In-memory cache by quotedStanzaId
         if (quotedStanzaId) {
-            let cached = viewOnceCache.get(quotedStanzaId) || viewOnceCache.get(`${chatId}:${quotedStanzaId}`);
+            let cached = viewOnceCache.get(quotedStanzaId) ||
+                         (rawChatId ? viewOnceCache.get(`${rawChatId}:${quotedStanzaId}`) : null) ||
+                         (cleanedChatId ? viewOnceCache.get(`${cleanedChatId}:${quotedStanzaId}`) : null) ||
+                         (quotedParticipant ? viewOnceCache.get(`${quotedParticipant}:${quotedStanzaId}`) : null);
+
             if (cached) {
                 let buf = cached.buffer;
+                if (!buf && cached.msgId) {
+                    const diskEntry = loadFromDiskCache(cached.msgId);
+                    if (diskEntry && diskEntry.buffer) buf = diskEntry.buffer;
+                }
                 if (!buf && cached.mediaContent) {
                     buf = await downloadMediaBuffer(cached.mediaContent, cached.mediaType);
                 }
                 if (buf && buf.length > 0) {
                     return {
-                        mediaContent: cached.mediaContent,
-                        mediaType: cached.mediaType,
-                        mimeType: cached.mimeType,
-                        caption: cached.caption,
+                        mediaContent: cached.mediaContent || null,
+                        mediaType: cached.mediaType || 'image',
+                        mimeType: cached.mimeType || 'image/jpeg',
+                        caption: cached.caption || '',
                         buffer: buf,
-                        isPtt: cached.isPtt
+                        isPtt: Boolean(cached.isPtt)
                     };
                 }
             }
@@ -394,11 +434,11 @@ async function extractViewOnceMedia(message) {
                 viewOnceCache.set(quotedStanzaId, diskEntry);
                 return {
                     mediaContent: diskEntry.mediaContent || null,
-                    mediaType: diskEntry.mediaType,
-                    mimeType: diskEntry.mimeType,
-                    caption: diskEntry.caption,
+                    mediaType: diskEntry.mediaType || 'image',
+                    mimeType: diskEntry.mimeType || 'image/jpeg',
+                    caption: diskEntry.caption || '',
                     buffer: diskEntry.buffer,
-                    isPtt: diskEntry.isPtt
+                    isPtt: Boolean(diskEntry.isPtt)
                 };
             }
         }
@@ -451,28 +491,37 @@ async function extractViewOnceMedia(message) {
         }
 
         // 4. FOURTH PRIORITY: Chat-level latest view-once fallback
-        // If user quoted a view-once message on WhatsApp Mobile where WhatsApp stripped the media key
-        if (chatId && chatLatestViewOnce.has(chatId)) {
-            const latest = chatLatestViewOnce.get(chatId);
-            // Only use if within the last 4 hours
-            if (latest && (Date.now() - (latest.timestamp || 0) < 4 * 60 * 60 * 1000)) {
-                let buf = latest.buffer;
-                if (!buf && latest.msgId) {
-                    const diskEntry = loadFromDiskCache(latest.msgId);
-                    if (diskEntry) buf = diskEntry.buffer;
-                }
-                if (!buf && latest.mediaContent) {
-                    buf = await downloadMediaBuffer(latest.mediaContent, latest.mediaType);
-                }
-                if (buf && buf.length > 0) {
-                    return {
-                        mediaContent: latest.mediaContent || null,
-                        mediaType: latest.mediaType,
-                        mimeType: latest.mimeType,
-                        caption: latest.caption,
-                        buffer: buf,
-                        isPtt: latest.isPtt
-                    };
+        // Check candidate chat keys (raw, cleaned, quoted participant, sender)
+        const candidateChatKeys = [
+            rawChatId,
+            cleanedChatId,
+            quotedParticipant,
+            cleanedSender
+        ].filter(Boolean);
+
+        for (const candidateKey of candidateChatKeys) {
+            if (chatLatestViewOnce.has(candidateKey)) {
+                const latest = chatLatestViewOnce.get(candidateKey);
+                // Within last 24 hours
+                if (latest && (Date.now() - (latest.timestamp || 0) < 24 * 60 * 60 * 1000)) {
+                    let buf = latest.buffer;
+                    if (!buf && latest.msgId) {
+                        const diskEntry = loadFromDiskCache(latest.msgId);
+                        if (diskEntry && diskEntry.buffer) buf = diskEntry.buffer;
+                    }
+                    if (!buf && latest.mediaContent) {
+                        buf = await downloadMediaBuffer(latest.mediaContent, latest.mediaType);
+                    }
+                    if (buf && buf.length > 0) {
+                        return {
+                            mediaContent: latest.mediaContent || null,
+                            mediaType: latest.mediaType || 'image',
+                            mimeType: latest.mimeType || 'image/jpeg',
+                            caption: latest.caption || '',
+                            buffer: buf,
+                            isPtt: Boolean(latest.isPtt)
+                        };
+                    }
                 }
             }
         }
