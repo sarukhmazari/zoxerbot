@@ -16,6 +16,7 @@ const commandCatalog = {
     'topmembers': { category: 'Core', desc: 'View leaderboard of most active group participants.', usage: '.topmembers' },
     'time': { category: 'Core', desc: 'Check current time and timezone for any global city.', usage: '.time [city/country]' },
     'sticker': { category: 'Media', desc: 'Convert replied image or video into a WebP sticker.', usage: '.sticker or .s' },
+    'img2pdf': { category: 'Media', desc: 'Convert single or batch images into a clean multi-page PDF document.', usage: '.img2pdf <title> or .img2pdf start <title>' },
     'emojimix': { category: 'Media', desc: 'Merge two emojis into a Google Emoji Kitchen sticker.', usage: '.emojimix <emoji1>+<emoji2>' },
     'crop': { category: 'Media', desc: 'Crop replied image or video into a 1:1 square sticker.', usage: '.crop' },
     'take': { category: 'Media', desc: 'Change sticker pack name and author EXIF metadata.', usage: '.take [pack] | [author]' },
@@ -221,6 +222,7 @@ async function helpCommand(sock, chatId, message, customChannelLink) {
             `│  *.time <city>*\n` +
             `╰──────────────\n\n` +
             `╭─〔 ▣ 𝗠𝗘𝗗𝗜𝗔 〕\n` +
+            `│  *.img2pdf <title>* 〔*.topdf*, *.pdf*〕\n` +
             `│  *.sticker* 〔*.s*〕\n` +
             `│  *.emojimix <e1>+<e2>* 〔*.emix*〕\n` +
             `│  *.crop*\n` +

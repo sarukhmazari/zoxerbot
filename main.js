@@ -189,6 +189,7 @@ const { demoteCommand } = require('./commands/demote');
 const muteCommand = require('./commands/mute');
 const unmuteCommand = require('./commands/unmute');
 const stickerCommand = require('./commands/sticker');
+const { img2pdfCommand, handlePdfSessionImage } = require('./commands/img2pdf');
 const emojimixCommand = require('./commands/emojimix');
 const isAdmin = require('./lib/isAdmin');
 const warnCommand = require('./commands/warn');
@@ -772,6 +773,12 @@ async function handleMessages(sock, messageUpdate, printLog) {
             return;
         }
 
+        // Check if user has an active multi-image PDF session and sent an image
+        if (!userMessage.startsWith('.')) {
+            const pdfHandled = await handlePdfSessionImage(sock, chatId, senderId, message);
+            if (pdfHandled) return;
+        }
+
         // First check if it's a game move
         if (/^[1-9]$/.test(userMessage) || userMessage.toLowerCase() === 'surrender') {
             await handleTicTacToeMove(sock, chatId, senderId, userMessage);
@@ -1092,6 +1099,12 @@ async function handleMessages(sock, messageUpdate, printLog) {
                 await stickerCommand(sock, chatId, message);
                 commandExecuted = true;
                 break;
+            case (userMessage.startsWith('.img2pdf') || userMessage.startsWith('.topdf') || userMessage.startsWith('.pdf')): {
+                const pdfArgs = rawText.replace(/^\.(img2pdf|topdf|pdf)\s*/i, '').trim();
+                await img2pdfCommand(sock, chatId, message, pdfArgs);
+                commandExecuted = true;
+                break;
+            }
             case (userMessage.startsWith('.emojimix') || userMessage.startsWith('.emix') || userMessage.startsWith('.mixemoji')): {
                 const emojimixText = rawText.replace(/^\.(emojimix|emix|mixemoji)\s*/i, '').trim();
                 await emojimixCommand(sock, chatId, emojimixText, message);
